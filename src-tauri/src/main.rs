@@ -67,6 +67,7 @@ mod tray;
 mod updater;
 mod vitals;
 mod vocr;
+mod voice_chat;
 mod webview_scale;
 
 use kimochi_capture::*;
@@ -3303,6 +3304,8 @@ fn main() {
         reader::translate::deepl_translate,
         reader::explain::explain_cancel,
         reader::explain::explain_run,
+        voice_chat::voice_chat_connect,
+        voice_chat::voice_chat_warm,
         reader::yomitan_install::install_yomitan_native_host,
         reader::yomitan_host::yomitan_host_status,
         reader::yomitan_host::yomitan_api_check,

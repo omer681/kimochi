@@ -60,6 +60,8 @@ import { recognize } from './ocr.js'
 import { annotationGroups, hookAnnotations, splitSpeaker } from './hook-match.js'
 import { createHookCard, HOOK_CARD_OPACITIES } from './hook-card.js'
 import { createOverlayHints, HINTS_DISMISSED } from './overlay-hints.js'
+import { acceleratorLabel, createVoiceChat, pastLines, prewarmWebRtc } from './voice-chat.js'
+import { describeScreen } from './screen-layout.js'
 import { hookCardShow, hookSettings } from './hook-games.js'
 import { normalizeOcrResult, scanGroups } from './ocr-result.js'
 import { logSections } from './log-sections.js'
@@ -421,6 +423,74 @@ hook.card = createHookCard(document.body, {
     await window.__TAURI__.event.emit('main:show-settings')
   }
 })
+
+// A short spoken chat about the overlay's text, on the Voice chat shortcut (ui/voice-chat.js).
+const voiceChat = createVoiceChat(document.body, {
+  connect: (sdp, screen, context) => native.voiceChatConnect(sdp, screen, context),
+  warm: () => native.voiceChatWarm(),
+  endKey: async () => {
+    const hotkeys = await native.hotkeysLoad().catch(() => null)
+    return acceleratorLabel(hotkeys?.voiceChat?.accelerator, window.__KIMOCHI_PLATFORM__?.os === 'macos')
+  },
+  log
+})
+// With the shortcut on, bring WebRTC up now rather than on the first press (about 0.4 s).
+void native.hotkeysLoad().then(
+  (hotkeys) => {
+    if (hotkeys?.voiceChat?.enabled) setTimeout(() => void prewarmWebRtc(), 3000)
+  },
+  () => {}
+)
+
+/**
+ * The Voice chat shortcut: start a chat about the text the overlay shows (the newest scan, with
+ * the lines that were on screen before it as context), or end the one going. Only while the overlay is up with text on
+ * it: a chat is about what is on screen.
+ */
+function toggleVoiceChat() {
+  if (voiceChat.active) return voiceChat.toggle()
+  if (!state.flags.overlayVisible) {
+    log({ check: 'voice-chat', event: 'skipped', reason: 'overlay hidden' })
+    return undefined
+  }
+  const history = listHistory() ?? []
+  const line = state.annotations.length > 0 ? (history[0]?.text ?? '') : ''
+  if (!line.trim()) return voiceChat.notice('Scan the text first, then talk about it.')
+  // The screen as a map of its text and where the pointer is; just the line when it can't be placed.
+  const boxes = screenTextBoxes()
+  const screen = describeScreen(boxes, screenArea(), lastPointer) ?? { text: line, boxes: [] }
+  // The last 200 words of lines that were on screen before and are gone now, each once, oldest
+  // first (a dialog box's earlier lines).
+  const context = pastLines(history.slice(1), [line, ...boxes.map((box) => box.text)])
+  return voiceChat.toggle(screen, context)
+}
+
+/** Where the overlay's text is, in overlay coordinates, with its lines and words where known. */
+function screenTextBoxes() {
+  if (!state.info || !state.origin || !state.annotations.length) return []
+  try {
+    const shown = visibleAnnotations(state.annotations, setting('textOverlayGrouping'))
+    return mapAnnotations(state.info, shown, state.origin, sourceBoundsNow() ?? undefined)
+  } catch {
+    return []
+  }
+}
+
+/** The source's bounds on the desktop now, as `textBoxes` reads them. */
+function sourceBoundsNow() {
+  if (!state.info) return null
+  return state.detached ? (state.info.source_bounds ?? null) : (state.sourceBounds ?? state.info.source_bounds ?? null)
+}
+
+/** The game's window in overlay coordinates: the frame of voice chat's map. */
+function screenArea() {
+  const bounds = sourceBoundsNow()
+  if (!bounds || !state.origin) return null
+  return { x: bounds.x - state.origin.x, y: bounds.y - state.origin.y, width: bounds.width, height: bounds.height }
+}
+
+/** The pointer in overlay coordinates as last seen (`pointer`), or null; for voice chat's map. */
+let lastPointer = null
 
 // What Shift does, along the bottom while there is text, until the reader closes it.
 const hints = createOverlayHints(document.body, {
@@ -2542,6 +2612,8 @@ async function onAction(name) {
       return controller.toggle()
     case 'playAudio':
       return playLatest()
+    case 'voiceChat':
+      return toggleVoiceChat()
     // The controller reads these back from the shared view, so this window owns
     // the flip. Native must pass these names through without touching the flag,
     // or the switch would toggle twice and appear dead.
@@ -5373,6 +5445,8 @@ await native.listen('pointer', ({ payload }) => {
   }
   const armed = !clickThrough() || gateOpen
   if (local) hints.pointer(local.x, local.y)
+  lastPointer = payload.over === false ? null : local
+  if (voiceChat.active) voiceChat.pointer(lastPointer)
   // A drag of the Text Hooker's card follows the pointer and nothing else does meanwhile.
   if (local && hook.card?.pointer(local.x, local.y, Boolean(payload.down), armed)) return
   checkPopupLeave(payload.over === false || !local ? null : { x: payload.x, y: payload.y })

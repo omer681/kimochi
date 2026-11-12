@@ -53,6 +53,32 @@ Japanese the dialog says so.
 
 <Screenshot id="explain-settings" alt="The Explain settings dialog: Provider, model and the prompt." width={760} />
 
+## Voice chat
+
+When one or two things on screen are unclear, you can ask out loud. With text scanned on the
+overlay, press the **Voice chat** shortcut (<kbd>Shift+F7</kbd>, <kbd>⇧⌘7</kbd> on macOS) and ask,
+in English or whatever language you speak, about a word, a reading or a bit of grammar. An AI tutor
+that knows the text on screen, where each part of it sits and the lines that were on screen before
+it (a dialog box's earlier lines, say) answers in voice, and a card at the top of the screen shows what you said and its answer. You can interrupt it.
+
+Point at what you mean: the tutor is told which word your pointer is on, and where it moves, so
+"what does this mean?" is enough. It gets the text, not a picture of the screen.
+
+Press the shortcut again to end, or just stop talking: the chat ends after about 25 seconds of quiet,
+and after 3 minutes at most.
+
+To set it up:
+
+1. Add an [OpenAI API key](https://platform.openai.com/api-keys) in **Settings → Translation & AI →
+   Voice chat**, and pick a voice. The chat uses OpenAI's GPT-Live, which OpenAI bills to that key
+   by the second (separately from a ChatGPT subscription). The key is kept in `settings.json`
+   and isn't synced or backed up.
+2. Turn on the **Voice chat** shortcut in **Settings → Shortcuts & Controls**, where you can change
+   its key too.
+
+Use headphones: the microphone also hears your game's sound through speakers, and the tutor may
+take a game's voice for yours. Your voice and the lines go to OpenAI only while a chat is on.
+
 ## Read aloud
 
 :::note[Japanese only]

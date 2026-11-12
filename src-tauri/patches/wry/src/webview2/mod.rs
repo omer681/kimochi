@@ -494,24 +494,34 @@ impl InnerWebView {
       Self::add_script_to_execute_on_document_created(&webview, init_script.script)?;
     }
 
-    // Enable clipboard
-    if attributes.clipboard {
-      unsafe {
-        webview.add_PermissionRequested(
-          &PermissionRequestedEventHandler::create(Box::new(|_, args| {
-            let Some(args) = args else { return Ok(()) };
+    // Enable clipboard; and (Kimochi) the microphone for the app's own pages, whose overlay asks
+    // for it for voice chat while it takes no clicks, so WebView2's own prompt could never be
+    // answered. Every other page (a dictionary's, an extension's) still gets the prompt.
+    let clipboard = attributes.clipboard;
+    unsafe {
+      webview.add_PermissionRequested(
+        &PermissionRequestedEventHandler::create(Box::new(move |_, args| {
+          let Some(args) = args else { return Ok(()) };
 
-            let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
-            args.PermissionKind(&mut kind)?;
-            if kind == COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ {
+          let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+          args.PermissionKind(&mut kind)?;
+          if clipboard && kind == COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ {
+            args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?;
+          } else if kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE {
+            let uri = {
+              let mut uri = PWSTR::null();
+              args.Uri(&mut uri)?;
+              take_pwstr(uri)
+            };
+            if kimochi_app_page(&uri) {
               args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?;
             }
+          }
 
-            Ok(())
-          })),
-          &mut token,
-        )?;
-      }
+          Ok(())
+        })),
+        &mut token,
+      )?;
     }
 
     // Navigation
@@ -1851,4 +1861,14 @@ fn is_windows_7() -> bool {
   let v = windows_version::OsVersion::current();
   // windows 7 is 6.1
   v.major == 6 && v.minor == 1
+}
+
+/// (Kimochi) A page the app itself serves: its custom protocol on Windows (`tauri.localhost`), or
+/// the dev server in a debug build. Only these may use the microphone without WebView2's prompt.
+fn kimochi_app_page(uri: &str) -> bool {
+  let origin = uri.split('?').next().unwrap_or_default();
+  ["http://tauri.localhost/", "https://tauri.localhost/"]
+    .iter()
+    .any(|base| origin.starts_with(base))
+    || (cfg!(debug_assertions) && origin.starts_with("http://127.0.0.1:1430/"))
 }

@@ -553,8 +553,23 @@ fn default_hotkeys_for(steam_deck: bool) -> Map<String, Value> {
             "gamepadButtons": menu_chord
         }),
     );
+    // Off until it is wanted: it needs an OpenAI key, and a registered key is taken from
+    // every other application.
+    hotkeys.insert(
+        "voiceChat".into(),
+        json!({
+            "name": "Voice chat",
+            "accelerator": VOICE_CHAT_KEY,
+            "description": "Talk about the text on the overlay; press again to end",
+            "enabled": false,
+            "gamepadButtons": []
+        }),
+    );
     hotkeys
 }
+
+/// Voice chat's default key, next to Scan's: Shift+F7, or ⌘⇧7 on macOS.
+const VOICE_CHAT_KEY: &str = if cfg!(target_os = "macos") { "CommandOrControl+Shift+7" } else { "Shift+F7" };
 
 /// A binding's gamepad chord: `gamepadButtons`, or the legacy single `gamepadButton` read
 /// as a chord of one. A `gamepadButtons` key that is present always wins, even as `null`, so
@@ -848,7 +863,7 @@ mod tests {
         s.doc.lock().unwrap()["hotkeys"] = json!({"playAudio": {"accelerator": "Alt+7", "gamepadButton": 2}});
         let merged = merged_hotkeys(&s);
         let names: Vec<&String> = merged.keys().collect();
-        assert_eq!(names, ["openControllerMenu", "triggerScan"]);
+        assert_eq!(names, ["openControllerMenu", "triggerScan", "voiceChat"]);
     }
 
     #[test]

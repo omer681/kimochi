@@ -1,4 +1,4 @@
-/** Settings → Translation & AI: translation (your DeepL key or Kimochi cloud) and the Explain action for Log lines. */
+/** Settings → Translation & AI: translation (your DeepL key or Kimochi cloud), the Explain action for Log lines, and voice chat. */
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Input, Select, SettingsPage, SettingsRow, SettingsSection } from '@kit'
 import { ExplainSettingsModal } from '@texthooker/components/ExplainSettingsModal'
@@ -10,13 +10,14 @@ import type { Language } from '@ui/languages'
 import { useAccount } from '../../bridge/account'
 import { useLanguage } from '../../bridge/useLanguage'
 import { openSettings } from '../../bridge/tauri'
+import { useSetting } from '../../bridge/useSetting'
 import { WithReaderSettings } from './ReaderSettingsProvider'
 
 export function AssistTab(): ReactNode {
   return (
     <SettingsPage
       title="Translation & AI"
-      description="Help with a line you can't read yet. Both are in each line's menu in the Log."
+      description="Help with a line you can't read yet: from each line's menu in the Log, or by voice over the overlay."
     >
       <WithReaderSettings>{(settings) => <AssistSections settings={settings} />}</WithReaderSettings>
     </SettingsPage>
@@ -113,6 +114,81 @@ function AssistSections({ settings }: { settings: Settings }): ReactNode {
         </SettingsRow>
       </SettingsSection>
       <ExplainSettingsModal open={explainOpen} onOpenChange={setExplainOpen} settings={settings} />
+      <VoiceChatSection />
     </div>
+  )
+}
+
+/** GPT-Live's voices (src-tauri/src/voice_chat.rs `VOICES`); Marin is the default. */
+const VOICES = [
+  'marin',
+  'quartz',
+  'ripple',
+  'vesper',
+  'willow',
+  'stone',
+  'gleam',
+  'meridian',
+  'bossa',
+  'tempo',
+  'beacon',
+  'delta',
+  'cinder',
+  'nuri',
+  'juni',
+  'flitz',
+  'brise',
+  'sillage',
+  'nira',
+  'harema',
+  'shida',
+  'noeul'
+].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) }))
+
+/**
+ * Voice chat: a short spoken chat about the overlay's text with OpenAI's GPT-Live, on its
+ * shortcut. The key is read by native only (`voice_chat_connect`); it is a secret by its name, so
+ * it never syncs.
+ */
+function VoiceChatSection(): ReactNode {
+  const [key, setKey] = useSetting<string>('voiceChat.openaiApiKey', '')
+  const [voice, setVoice] = useSetting<string>('voiceChat.voice', 'marin')
+  const [draft, setDraft] = useState(key)
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- the draft follows outside changes
+  useEffect(() => setDraft(key), [key])
+  return (
+    <SettingsSection
+      title="Voice chat"
+      description="Talk with an AI tutor about the text on the overlay. Press the Voice chat shortcut, ask, and press it again to end."
+    >
+      <SettingsRow
+        label="OpenAI API key"
+        controlId="assist-openai"
+        description="Voice chat uses OpenAI's GPT-Live, billed to this key by the second. Stored in settings.json."
+      >
+        <Input
+          id="assist-openai"
+          type="password"
+          mono
+          autoComplete="off"
+          className="settings-field"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            const next = draft.trim()
+            if (next !== key) void setKey(next)
+          }}
+          placeholder="sk-…"
+        />
+      </SettingsRow>
+      <SettingsRow label="Voice">
+        <Select aria-label="Voice" value={voice} onValueChange={(value) => void setVoice(value)} options={VOICES} />
+      </SettingsRow>
+      <SettingsRow label="Shortcut" description="Off until you turn it on.">
+        <Button size="sm" onClick={() => void openSettings('controls')}>
+          Shortcuts…
+        </Button>
+      </SettingsRow>
+    </SettingsSection>
   )
 }

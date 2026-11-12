@@ -1,0 +1,110 @@
+/*
+ * Voice chat's card (voice-chat.js): a dark frosted panel at the top of the overlay, out of the
+ * way of the text it is about and of the hint bar at the bottom. It takes no clicks: the
+ * shortcut starts and ends the chat.
+ */
+.voice-chat {
+  position: fixed;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 2147483001;
+  box-sizing: border-box;
+  width: min(460px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border-radius: 16px;
+  font:
+    500 14px/1.45 'Figtree',
+    system-ui,
+    sans-serif;
+  color: rgb(255 255 255 / 0.9);
+  background: rgb(18 18 22 / 0.86);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow:
+    0 8px 28px rgb(0 0 0 / 0.32),
+    inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  pointer-events: none;
+  user-select: none;
+  animation: voice-chat-in 200ms ease-out;
+}
+.voice-chat[hidden] {
+  display: none;
+}
+.voice-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.voice-chat-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.4);
+}
+.voice-chat[data-state='ready'] .voice-chat-dot,
+.voice-chat[data-state='listening'] .voice-chat-dot {
+  background: #4ade80;
+}
+.voice-chat[data-state='listening'] .voice-chat-dot,
+.voice-chat[data-state='speaking'] .voice-chat-dot,
+.voice-chat[data-state='connecting'] .voice-chat-dot,
+.voice-chat[data-state='thinking'] .voice-chat-dot {
+  animation: voice-chat-pulse 1.1s ease-in-out infinite;
+}
+.voice-chat[data-state='speaking'] .voice-chat-dot {
+  background: #60a5fa;
+}
+.voice-chat[data-state='error'] .voice-chat-dot {
+  background: #f87171;
+}
+.voice-chat-status {
+  flex: 1;
+  font-weight: 600;
+}
+.voice-chat-hint {
+  flex: none;
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.55);
+}
+.voice-chat-you,
+.voice-chat-reply {
+  margin: 8px 0 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+.voice-chat-you:empty,
+.voice-chat-reply:empty {
+  display: none;
+}
+.voice-chat-you {
+  -webkit-line-clamp: 2;
+  color: rgb(255 255 255 / 0.62);
+}
+.voice-chat-you::before {
+  content: 'You: ';
+  font-weight: 600;
+}
+/* A long answer is kept to its end in script (`tail`); this is the backstop. */
+.voice-chat-reply {
+  -webkit-line-clamp: 5;
+}
+@keyframes voice-chat-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+}
+@keyframes voice-chat-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-chat,
+  .voice-chat-dot {
+    animation: none !important;
+  }
+}

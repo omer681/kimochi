@@ -138,6 +138,12 @@ export function Privacy() {
           and its terms.
         </li>
         <li>
+          <strong>Voice chat</strong>, if you add your own OpenAI API key and use its shortcut, sends your
+          microphone&rsquo;s audio, the scanned text with where each block sits on screen and which word your pointer is
+          on (as text, not a screenshot), and up to 200 words of the lines scanned before it, straight from the app to
+          OpenAI under your account, only while a chat is on. Nothing passes through our server.
+        </li>
+        <li>
           <strong>Yomitan API helper.</strong> If you choose the Yomitan API dictionary option and install its optional
           native helper, the helper is downloaded from GitHub. Lookups then go to the Yomitan in your own browser, on
           your computer.

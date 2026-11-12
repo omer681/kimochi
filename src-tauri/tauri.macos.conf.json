@@ -3,7 +3,8 @@
   "bundle": {
     "targets": ["app"],
     "macOS": {
-      "minimumSystemVersion": "14.0"
+      "minimumSystemVersion": "14.0",
+      "entitlements": "Kimochi.entitlements"
     }
   }
 }

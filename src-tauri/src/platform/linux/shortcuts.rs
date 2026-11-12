@@ -315,6 +315,7 @@ fn bind(app: &tauri::AppHandle, definitions: serde_json::Map<String, Value>, gen
         let description = match name.as_str() {
             "triggerScan" => "Scan text",
             "openControllerMenu" => "Open Kimochi controls",
+            "voiceChat" => "Talk about the text on Kimochi's overlay",
             _ => &name,
         };
         let mut data = Dict::new();

@@ -221,6 +221,10 @@ export const openSourcePicker = () => invoke('open_source_picker')
 export const preferences = () => invoke('preferences')
 /** Read text aloud through Kimochi cloud (the key stays in Rust); the audio bytes. */
 export const ttsSpeak = (text, voiceId) => invoke('tts_speak', { text, voiceId })
+/** Voice chat's handshake: the SDP offer and the text out, OpenAI's SDP answer back. */
+export const voiceChatConnect = (sdp, screen, context) => invoke('voice_chat_connect', { sdp, screen, context })
+/** Opens native's connection to OpenAI ahead of `voiceChatConnect`; sends nothing of the reader's. */
+export const voiceChatWarm = () => invoke('voice_chat_warm')
 export const selectedSource = () => optional('selected_source', undefined, null)
 /**
  * The whole window, full resolution, from a slot of its own (`{url, width, height,

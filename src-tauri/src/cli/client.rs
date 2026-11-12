@@ -230,8 +230,8 @@ Usage: kimochi action <name>
        kimochi action --list
 
 Fire an action as a shortcut, the tray or a button would: triggerScan, toggleOverlay,
-setCropArea, setAnkiCropArea, playAudio, selectAndScan, openControllerMenu, toggleAutoOcr,
-toggleTextOverlay, toggleDebugOverlay.",
+setCropArea, setAnkiCropArea, playAudio, selectAndScan, openControllerMenu, voiceChat,
+toggleAutoOcr, toggleTextOverlay, toggleDebugOverlay.",
         "watch" => "\
 Usage: kimochi watch [<event>...]
 

@@ -111,7 +111,7 @@ function HoverLookupRow(): ReactNode {
 }
 
 /** Display order. The native side returns the bindings keyed alphabetically. */
-const ORDER: HotkeyName[] = ['triggerScan', 'openControllerMenu']
+const ORDER: HotkeyName[] = ['triggerScan', 'openControllerMenu', 'voiceChat']
 
 export function ShortcutsSections(): ReactNode {
   const [hotkeys, setHotkeys, hotkeyFailures] = useHotkeys()

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the app's Info.plist by Tauri. Without a usage description macOS ends the app
+     the moment it asks for the microphone (voice chat, src-tauri/src/voice_chat.rs). -->
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Kimochi uses the microphone only while you are in a voice chat about the text on screen.</string>
+</dict>
+</plist>

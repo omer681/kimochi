@@ -599,7 +599,10 @@ and compares against the names the frontend actually calls, so a button cannot s
 against an action that does not exist.
 
 **Commands** — `triggerScan`, `toggleOverlay`, `setCropArea`, `setAnkiCropArea`, `playAudio`,
-`selectAndScan`. Bindable to a shortcut or a gamepad button. Rust performs the native
+`selectAndScan`, `voiceChat`. `triggerScan`, `openControllerMenu` and `voiceChat` are bindable to a
+shortcut or a gamepad button (`voiceChat` is off by default, on Shift+F7 or ⌘⇧7). `voiceChat`
+starts or ends the overlay's voice chat (see Voice chat, below) and never shows a hidden overlay:
+with none up it does nothing. Rust performs the native
 part Electron performed: restoring the overlay for `triggerScan`, `setCropArea`,
 `setAnkiCropArea`, `playAudio` and `selectAndScan`, toggling it for `toggleOverlay`, and focusing it for
 `selectAndScan`.
@@ -1159,6 +1162,53 @@ while signed in, otherwise the DeepL key. `deepl_translate` (`({text, apiKey}) -
 from the `language` setting (DeepL's code: `ZH` for Chinese and Cantonese, `NB` for Norwegian) to
 `EN-US`, and refuses a language DeepL does not take ("DeepL cannot translate from this language
 (<code>)…") without sending anything.
+
+**Voice chat.** `voice_chat_connect` `({sdp, screen, context}) -> String` (`voice_chat.rs`): the
+handshake for the overlay's WebRTC call to OpenAI's GPT-Live (`gpt-live-1`). It creates the Live
+session, `POST https://api.openai.com/v1/live/sessions` with `voiceChat.openaiApiKey` and
+`{session: {model, instructions, audio.output.voice, delegation: {type: 'client'}}, transport:
+{type: 'webrtc', sdp}}`, and returns the answer in the `201`'s `transport.sdp`. The instructions
+are built from `screen` and `context` (the last 200 words of lines that were on screen and are
+not now, each once wherever it was, oldest first, marked `(line 2 of 3)` in its block where the
+history entry kept its `groups`: `pastLines` in `ui/voice-chat.js`), cut to 8000
+and the last 4000 characters. `screen` is the overlay's text as text, never a picture
+(`ui/screen-layout.js`): a 48×14 character map of the source window with each text box drawn
+and numbered in reading order and `@` at the pointer; a legend (each box's place, whether it is
+vertical, its line count, its text); and the pointer: the paragraph (box) it is on or nearest,
+which line of it, and the word under it with its place in that line in characters, the line
+marked `今日はいい【天気】だね`. The pointer finds a character (the engine's box under it, often one per
+character, and the pointer's share of that box; without boxes, its share of the line), widened
+to its word by `Intl.Segmenter('ja')` (punctuation stays itself); the character is named too,
+and the instructions say to talk about the whole word it belongs to, endings included, since the
+breaker cuts conjugated verbs short. With no box to place it is the newest scan's text alone.
+During the chat each move of the pointer to another word, once it has rested 400 ms, is sent as a
+`session.thinking.append` (`delegation_id: null`) in the same words, headed "Context only, not a
+question". Pace and length are set by the instructions alone (brisk; one or two short sentences,
+then stop): GPT-Live has no speed or output-length field. The key is never sent to a
+webview by this command (Settings still shows it, from `settings.json`).
+Client delegation is the only mode without a backend agent; the instructions say to answer
+everything itself, and the overlay answers any `session.delegation.created` at once with a
+`session.thinking.append` saying there is no backend. Settings: `voiceChat.openaiApiKey`
+(private by its name, so never synced or put in a profile), `voiceChat.voice` (`marin` default;
+an unknown name reads as it). Errors are worded for the reader: no key, no text, `401` (the key),
+`403`, `429` (the key's limit, with OpenAI's message), and anything else with its status. The
+overlay (`ui/voice-chat.js`) owns the rest: the microphone (`getUserMedia`, echo cancellation on),
+the `oai-events` data channel (`session.started`, both sides' transcript fragments,
+`session.closed`), and the card; it ends the chat on the shortcut, after 25 s with nothing said
+either way, or at 3 minutes, with `session.close` (hanging up on `session.closed` or after 2 s).
+
+Setup runs side by side: on the press the overlay opens the microphone, builds its offer (an audio
+transceiver whose track is put in once the microphone is open; candidates waited for up to 1.5 s)
+and calls `voice_chat_warm` `() -> ()`, which opens native's connection to OpenAI with a `HEAD
+https://api.openai.com/` (nothing of the reader's; skipped without a key) on the one client that
+`voice_chat_connect` then reuses. Only the session request waits for the microphone, so a refused
+one never starts a billed session. With the shortcut on, the overlay builds and drops one offer
+3 s after it loads, so the first press does not wait for WebRTC to start (about 0.4 s). Each
+chat's step times, from the press, are logged as `{check: "voice-chat", event: "ready",
+microphone, offer, candidates, answer, connected, channel, started}`. The microphone is granted to
+the app's own pages without a prompt on Windows (patched wry, `kimochi_app_page`); on macOS the
+bundle declares `NSMicrophoneUsageDescription` (`Info.plist`) and the
+`com.apple.security.device.audio-input` entitlement (`Kimochi.entitlements`).
 
 **Deep link.** `tauri-plugin-deep-link` registers `kimochi://` (`plugins.deep-link` in
 `tauri.conf.json`; installed by the bundles, registered at runtime by an AppImage or a debug

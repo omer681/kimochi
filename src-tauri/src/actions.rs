@@ -11,10 +11,13 @@ use tauri::{Emitter, Manager};
 /// frontend actually calls, so a button cannot ship against an action that does not
 /// exist.
 pub const ACTIONS: &[&str] = &[
-    // Commands. Only `triggerScan` and `openControllerMenu` are bindable now; the rest are
-    // still reached from the tray, the panels and the overlay's radial menu.
+    // Commands. Only `triggerScan`, `openControllerMenu` and `voiceChat` are bindable now; the
+    // rest are still reached from the tray, the panels and the overlay's radial menu.
     "triggerScan",
     "openControllerMenu",
+    // Starts or ends a voice chat about the overlay's text. It never brings a hidden overlay
+    // back: the chat is about what the overlay shows, so with none there is nothing to talk about.
+    "voiceChat",
     "toggleOverlay",
     "setCropArea",
     "setAnkiCropArea",
@@ -36,7 +39,7 @@ pub const ACTIONS: &[&str] = &[
 
 /// The subset that can be bound to a shortcut or a gamepad button. The order also breaks
 /// ties between gamepad chords of the same size: the earlier action wins.
-pub const HOTKEY_ACTIONS: &[&str] = &["triggerScan", "openControllerMenu"];
+pub const HOTKEY_ACTIONS: &[&str] = &["triggerScan", "openControllerMenu", "voiceChat"];
 
 /// Commands that bring the overlay back if it is hidden, so a shortcut never appears
 /// to do nothing. Deliberately excludes the toggles and the hover affordances: forcing

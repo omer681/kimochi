@@ -1,7 +1,7 @@
 /**
  * ADAPTED from `src/shared/defaults.ts` in the Electron app.
- * Deltas: only Scan and the controller menu remain bindable (the radial menu reaches the
- * rest), and gamepad bindings are chords (`gamepadButtons`). Must match `default_hotkeys` and
+ * Deltas: only Scan, the controller menu and Voice chat are bindable (the radial menu reaches
+ * the rest), and gamepad bindings are chords (`gamepadButtons`). Must match `default_hotkeys` and
  * `merged_hotkeys` in `src-tauri/src/settings.rs`, which is what the app actually loads.
  */
 import { HotkeysSettings, HotkeyOverrides } from './shared-types'
@@ -25,6 +25,14 @@ export const DEFAULT_HOTKEYS: HotkeysSettings = {
     // LS + RS: both stick clicks, which few games use together. A placeholder until the native
     // hotkeys load: on a Steam Deck the native default is the R4 back grip (settings.rs).
     gamepadButtons: [10, 11]
+  },
+  // Off until it is wanted: it needs an OpenAI key, and a registered key is taken from every app.
+  voiceChat: {
+    name: 'Voice chat',
+    accelerator: MAC ? 'CommandOrControl+Shift+7' : 'Shift+F7',
+    description: 'Talk about the text on the overlay; press again to end',
+    enabled: false,
+    gamepadButtons: []
   }
 }
 
