@@ -1200,14 +1200,14 @@ the `oai-events` data channel (`session.started`, both sides' transcript fragmen
 either way, or at 3 minutes, with `session.close` (hanging up on `session.closed` or after 2 s).
 
 Setup runs side by side: on the press the overlay opens the microphone, builds its offer (an audio
-transceiver whose track is put in once the microphone is open; candidates waited for up to 1.5 s)
+transceiver whose track is put in once the microphone is open; sent without waiting for its candidates)
 and calls `voice_chat_warm` `() -> ()`, which opens native's connection to OpenAI with a `HEAD
 https://api.openai.com/` (nothing of the reader's; skipped without a key) on the one client that
 `voice_chat_connect` then reuses. Only the session request waits for the microphone, so a refused
 one never starts a billed session. With the shortcut on, the overlay builds and drops one offer
 3 s after it loads, so the first press does not wait for WebRTC to start (about 0.4 s). Each
 chat's step times, from the press, are logged as `{check: "voice-chat", event: "ready",
-microphone, offer, candidates, answer, connected, channel, started}`. The microphone is granted to
+microphone, offer, answer, connected, channel, started}`. The microphone is granted to
 the app's own pages without a prompt on Windows (patched wry, `kimochi_app_page`); on macOS the
 bundle declares `NSMicrophoneUsageDescription` (`Info.plist`) and the
 `com.apple.security.device.audio-input` entitlement (`Kimochi.entitlements`).

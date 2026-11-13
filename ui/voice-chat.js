@@ -34,12 +34,6 @@ const MAX_MS = 3 * 60_000
 /** How long the last word (ended, or an error) stays on the card. */
 const LINGER_MS = 2_500
 const ERROR_MS = 6_000
-/**
- * The offer waits this long at most for its network candidates. Without STUN servers they are
- * this computer's own addresses, gathered in about 0.1 s; the cap keeps an odd network adapter
- * from holding the chat up (the docs' example waits up to 10 s).
- */
-const ICE_MS = 1_500
 /** After `session.close`, how long to wait for `session.closed` before hanging up anyway. */
 const CLOSE_MS = 2_000
 /** The reply to a delegation: there is no backend, so the model answers itself. */
@@ -205,23 +199,6 @@ export function closedProblem(reason) {
 /** What a pointer target says, to tell one word from another. */
 const pointerKey = (target) =>
   target ? `${target.number}|${target.on}|${target.under?.lineNumber ?? 0}|${target.under?.marked ?? ''}` : 'off'
-
-/** Resolves once the offer has gathered its network candidates, or after `ms` regardless. */
-function iceGathered(peer, ms) {
-  if (peer.iceGatheringState === 'complete') return Promise.resolve()
-  return new Promise((resolve) => {
-    const done = () => {
-      clearTimeout(timer)
-      peer.removeEventListener('icegatheringstatechange', check)
-      resolve()
-    }
-    const check = () => {
-      if (peer.iceGatheringState === 'complete') done()
-    }
-    const timer = setTimeout(done, ms)
-    peer.addEventListener('icegatheringstatechange', check)
-  })
-}
 
 /**
  * Start WebRTC once ahead of a chat: the first peer connection in a page takes about 0.4 s to come
@@ -528,9 +505,9 @@ export function createVoiceChat(parent, hooks) {
         onEvent(current, event)
       })
       await peer.setLocalDescription(await peer.createOffer())
+      // Sent as it is, without waiting for this computer's network candidates (about 0.12 s):
+      // OpenAI's end has a public address, and learns ours from the first packets we send it.
       mark('offer')
-      await iceGathered(peer, ICE_MS)
-      mark('candidates')
     } catch (error) {
       release()
       if (call === current)
