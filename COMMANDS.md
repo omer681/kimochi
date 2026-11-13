@@ -1163,7 +1163,7 @@ from the `language` setting (DeepL's code: `ZH` for Chinese and Cantonese, `NB` 
 `EN-US`, and refuses a language DeepL does not take ("DeepL cannot translate from this language
 (<code>)…") without sending anything.
 
-**Voice chat.** `voice_chat_connect` `({sdp, screen, context}) -> String` (`voice_chat.rs`): the
+**Voice chat.** `voice_chat_connect` `({sdp, screen, context, language?}) -> String` (`voice_chat.rs`): the
 handshake for the overlay's WebRTC call to OpenAI's GPT-Live (`gpt-live-1`). It creates the Live
 session, `POST https://api.openai.com/v1/live/sessions` with `voiceChat.openaiApiKey` and
 `{session: {model, instructions, audio.output.voice, delegation: {type: 'client'}}, transport:
@@ -1171,7 +1171,9 @@ session, `POST https://api.openai.com/v1/live/sessions` with `voiceChat.openaiAp
 are built from `screen` and `context` (the last 200 words of lines that were on screen and are
 not now, each once wherever it was, oldest first, marked `(line 2 of 3)` in its block where the
 history entry kept its `groups`: `pastLines` in `ui/voice-chat.js`), cut to 8000
-and the last 4000 characters. `screen` is the overlay's text as text, never a picture
+and the last 4000 characters, and `language`, the English name of the language being learned
+(`languageOf(code).name`), which the tutor is for (Japanese when absent or not a name). The map's
+words, their spacing and which boxes are kept follow that language too. `screen` is the overlay's text as text, never a picture
 (`ui/screen-layout.js`): a 48×14 character map of the source window with each text box drawn
 and numbered in reading order and `@` at the pointer; a legend (each box's place, whether it is
 vertical, its line count, its text); and the pointer: the paragraph (box) it is on or nearest,

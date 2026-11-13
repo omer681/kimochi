@@ -1,4 +1,6 @@
 /* eslint @typescript-eslint/explicit-function-return-type: "off" -- Plain JS runtime glue. */
+import { textLang } from './language-style.js'
+import { languageOf } from './languages.js'
 import { describePointer, pointerTarget } from './screen-layout.js'
 /**
  * Voice chat: a short spoken conversation with OpenAI's GPT-Live (`gpt-live-1`) about the text on
@@ -83,12 +85,33 @@ const MAX_PAST_WORDS = 200
 /** A line's letters, digits and kana/kanji: what stays the same between two readings of it. */
 const letters = (text) => (String(text ?? '').match(/[\p{L}\p{N}]/gu) ?? []).join('')
 
-const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter('ja', { granularity: 'word' }) : null
+const segmenters = new Map()
 
-/** How many words `text` has, Japanese (no spaces between them) included. */
-export function wordCount(text) {
-  // Without a word splitter, a Japanese word runs about two characters.
-  if (!segmenter) return Math.ceil(letters(text).length / 2)
+/** The platform's word breaker for the language `code`, or null without one. */
+function segmenterFor(code) {
+  const lang = textLang(code)
+  if (!segmenters.has(lang))
+    segmenters.set(
+      lang,
+      typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(lang, { granularity: 'word' }) : null
+    )
+  return segmenters.get(lang)
+}
+
+/**
+ * How many words `text` has in the language `code` (Japanese when absent), one that writes its
+ * words without spaces between them included.
+ */
+export function wordCount(text, code) {
+  const segmenter = segmenterFor(code)
+  if (!segmenter) {
+    // Without a word breaker: the spaced words, or, unspaced, a word for about two letters.
+    if (languageOf(code).spaces)
+      return String(text ?? '')
+        .split(/\s+/u)
+        .filter((word) => letters(word)).length
+    return Math.ceil(letters(text).length / 2)
+  }
   let count = 0
   for (const segment of segmenter.segment(String(text ?? ''))) if (segment.isWordLike) count++
   return count
@@ -118,11 +141,12 @@ function entryLines(entry) {
  * `entries` are the earlier scans, newest first; `current` the texts on screen now. A line is left
  * out when the screen still shows it, or when a newer line already kept holds it (the box was
  * scanned while its text was still typing out); an older line that holds a kept one replaces it.
- * Stops at the line that brings it to `max` words.
+ * Stops at the line that brings it to `max` words, counted in the language `language`.
  * @param {{ text?: string, groups?: { text?: string }[] }[]} entries
  * @param {(string | undefined)[]} current
+ * @param {string} [language]
  */
-export function pastLines(entries, current, max = MAX_PAST_WORDS) {
+export function pastLines(entries, current, language, max = MAX_PAST_WORDS) {
   const shown = current.map(letters).filter(Boolean)
   /** Newest first. */
   const kept = []
@@ -142,7 +166,7 @@ export function pastLines(entries, current, max = MAX_PAST_WORDS) {
         words -= kept[i].words
         kept.splice(i, 1)
       }
-      const line = { text, place, key, words: wordCount(text) }
+      const line = { text, place, key, words: wordCount(text, language) }
       kept.push(line)
       words += line.words
       if (words >= max) return result()
@@ -215,7 +239,7 @@ export async function prewarmWebRtc() {
 /**
  * @param {HTMLElement} parent
  * @param {{
- *   connect: (sdp: string, screen: string, context: string) => Promise<string>,
+ *   connect: (sdp: string, screen: string, context: string, language: string) => Promise<string>,
  *   warm?: () => Promise<void>,
  *   endKey: () => Promise<string>,
  *   log: (value: object) => void,
@@ -395,6 +419,8 @@ export function createVoiceChat(parent, hooks) {
       boxes: screen.boxes ?? [],
       /** The game's window, outside which the pointer is off the game. */
       area: screen.area ?? null,
+      /** The language being read (a code from languages.ts). */
+      language: languageOf(screen.language).code,
       /** What the model was last told the pointer is on, and the move waiting to be told. */
       pointerSaid: pointerKey(screen.target ?? null),
       pointerTimer: 0
@@ -489,7 +515,12 @@ export function createVoiceChat(parent, hooks) {
     try {
       const [track] = current.microphone.getAudioTracks()
       await slot.sender.replaceTrack(track ?? null)
-      const answer = await hooks.connect(peer.localDescription?.sdp ?? '', screen.text, context)
+      const answer = await hooks.connect(
+        peer.localDescription?.sdp ?? '',
+        screen.text,
+        context,
+        languageOf(current.language).name
+      )
       mark('answer')
       if (call !== current) return hangUp(current)
       await peer.setRemoteDescription({ type: 'answer', sdp: answer })
@@ -512,9 +543,9 @@ export function createVoiceChat(parent, hooks) {
       return call !== null
     },
     /**
-     * Start a chat about `screen` (`{text, boxes, target}`: the map and legend from
-     * `describeScreen`, or just the line's text), with the lines read before as `context`; or end
-     * the one going.
+     * Start a chat about `screen` (`{text, boxes, target, area, language}`: the map and legend from
+     * `describeScreen`, or just the line's text and its language), with the lines read before as
+     * `context`; or end the one going.
      */
     toggle(screen, context) {
       if (call) return end('shortcut')
@@ -528,7 +559,7 @@ export function createVoiceChat(parent, hooks) {
     pointer(point) {
       const current = call
       if (!current?.started || !current.boxes.length) return
-      const target = pointerTarget(current.boxes, point, current.area)
+      const target = pointerTarget(current.boxes, point, current.area, current.language)
       const key = pointerKey(target)
       clearTimeout(current.pointerTimer)
       if (key === current.pointerSaid) return

@@ -6,7 +6,8 @@
  *
  * Plain functions of rectangles in one coordinate space (the overlay's), so they can be tested
  * without a page. `ui/voice-chat.js` sends the map when a chat starts and a pointer line
- * (`describePointer`) whenever the pointer moves to another word.
+ * (`describePointer`) whenever the pointer moves to another word. `language` is the code of the
+ * language being read (languages.ts; Japanese when absent): its words, spacing and scripts.
  *
  * @typedef {{ x: number, y: number, width: number, height: number }} Rect
  * @typedef {Rect & { text: string }} Word
@@ -20,6 +21,10 @@
  *   segments?: Word[],
  * }} TextBox
  */
+
+import { textLang } from './language-style.js'
+import { languageOf } from './languages.js'
+import { hasLanguageScript, joiner } from './script-text.js'
 
 const COLS = 48
 const ROWS = 14
@@ -81,34 +86,45 @@ const along = (rect, point, down) =>
 
 /**
  * The character the pointer is on in a line, as an index into its text. With the engine's word
- * boxes (often a box per character for Japanese), the box under the pointer and the pointer's
+ * boxes (often a box per character for CJK text), the box under the pointer and the pointer's
  * share of it; without, the pointer's share of the whole line.
  */
-function characterAt(line, text, point, down) {
+function characterAt(line, text, point, down, language) {
   const words = line.words.filter((w) => w.text)
   if (!words.length) return Math.floor(along(line.rect, point, down) * [...text].length)
   const word =
     words.find((w) => inside(w, point)) ??
     words.reduce((best, w) => (distance(w, point) < distance(best, point) ? w : best), words[0])
-  const before = [
-    ...words
-      .slice(0, words.indexOf(word))
-      .map((w) => w.text)
-      .join('')
-  ].length
+  const before = [...joinWords(words.slice(0, words.indexOf(word) + 1), language)].length - [...word.text].length
   return before + Math.floor(along(word, point, down) * [...word.text].length)
 }
 
-/** Japanese word boundaries (the platform's dictionary-based word breaker), or null without one. */
-const segmenter =
-  typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter('ja', { granularity: 'word' }) : null
+/** A line's word boxes as one text: run together, or spaced in a language that spaces its words. */
+const joinWords = (words, language) => words.reduce((text, w) => text + joiner(text, w.text, language) + w.text, '')
+
+const segmenters = new Map()
+
+/**
+ * The language's word boundaries (the platform's dictionary-based word breaker for Japanese,
+ * Chinese and Thai), or null without one.
+ */
+function segmenterFor(language) {
+  const lang = textLang(language)
+  if (!segmenters.has(lang))
+    segmenters.set(
+      lang,
+      typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(lang, { granularity: 'word' }) : null
+    )
+  return segmenters.get(lang)
+}
 
 /**
  * The word around character `at` of `chars`, as character indices [from, to): the word the
- * platform's Japanese word breaker finds there (天気, not 天), or the character alone where that
- * is punctuation or there is no word breaker.
+ * platform's word breaker for the language finds there (天気, not 天), or the character alone
+ * where that is punctuation or there is no word breaker.
  */
-export function wordAround(chars, at) {
+export function wordAround(chars, at, language) {
+  const segmenter = segmenterFor(language)
   if (!segmenter) return [at, at + 1]
   let index = 0
   for (const part of segmenter.segment(chars.join(''))) {
@@ -125,20 +141,18 @@ export function wordAround(chars, at) {
  * in the line in characters (`start`–`end` of `length`, from 1) and the line marked 【like this】.
  * `character` is the one the pointer is on itself. Null when the box has no usable line text.
  */
-export function markUnder(box, point) {
+export function markUnder(box, point, language) {
   const lines = linesOf(box)
   const line =
     lines.find((l) => inside(l.rect, point)) ??
     lines.reduce((best, l) => (distance(l.rect, point) < distance(best.rect, point) ? l : best), lines[0])
   const place = { lineNumber: lines.indexOf(line) + 1, lineCount: lines.length }
   const words = line.words.filter((w) => w.text)
-  const text = words.length
-    ? words.map((w) => w.text).join('')
-    : clean(line.text ?? (lines.length === 1 ? box.text : ''))
+  const text = words.length ? joinWords(words, language) : clean(line.text ?? (lines.length === 1 ? box.text : ''))
   const chars = [...text]
   if (!chars.length) return null
-  const at = Math.max(0, Math.min(chars.length - 1, characterAt(line, text, point, vertical(box))))
-  const [from, to] = wordAround(chars, at)
+  const at = Math.max(0, Math.min(chars.length - 1, characterAt(line, text, point, vertical(box), language)))
+  const [from, to] = wordAround(chars, at, language)
   const word = chars.slice(from, to).join('')
   return {
     ...place,
@@ -159,8 +173,9 @@ export function markUnder(box, point) {
  * @param {TextBox[]} boxes in reading order (their numbers are their places, from 1)
  * @param {{ x: number, y: number } | null} point
  * @param {Rect | null} [area] the game's window: a pointer outside it is not over the game
+ * @param {string} [language]
  */
-export function pointerTarget(boxes, point, area = null) {
+export function pointerTarget(boxes, point, area = null, language) {
   if (!point || !boxes.length || (area && !inside(area, point))) return null
   let index = boxes.findIndex((b) => inside(b, point))
   const on = index >= 0
@@ -169,7 +184,7 @@ export function pointerTarget(boxes, point, area = null) {
     for (let i = 1; i < boxes.length; i++) if (distance(boxes[i], point) < distance(boxes[index], point)) index = i
   }
   const box = boxes[index]
-  return { number: index + 1, on, paragraph: clean(box.text), under: markUnder(box, point) }
+  return { number: index + 1, on, paragraph: clean(box.text), under: markUnder(box, point, language) }
 }
 
 /**
@@ -233,14 +248,15 @@ export function drawMap(boxes, area, point) {
  * @param {TextBox[]} boxes
  * @param {Rect | null} area the game's window (or the scanned area), same coordinates
  * @param {{ x: number, y: number } | null} point the pointer, same coordinates
+ * @param {string} [language]
  */
-export function describeScreen(boxes, area, point) {
+export function describeScreen(boxes, area, point, language) {
   const usable = boxes.filter((b) => clean(b.text) && b.width > 0 && b.height > 0)
   if (!usable.length) return null
   const frame = area && area.width > 0 && area.height > 0 ? area : union(usable)
   // A pointer off the game (another monitor, another window beside it) is no pointer.
   point = point && inside(frame, point) ? point : null
-  const kept = keep(usable, point)
+  const kept = keep(usable, point, language)
   const ordered = readingOrder(kept)
   const leftOut = usable.length - kept.length
   const legend = ordered.map((box, i) => {
@@ -257,7 +273,7 @@ export function describeScreen(boxes, area, point) {
     const text = clean(box.text)
     return `[${i + 1}] (${shape}) ${text.length > MAX_BOX_TEXT ? `${text.slice(0, MAX_BOX_TEXT)}…` : text}`
   })
-  const target = pointerTarget(ordered, point, frame)
+  const target = pointerTarget(ordered, point, frame, language)
   const text = [
     'Map of the game window (each box is a block of text, numbered in reading order; @ is the pointer):',
     drawMap(ordered, frame, point),
@@ -265,24 +281,28 @@ export function describeScreen(boxes, area, point) {
     'The boxes:',
     ...legend,
     ...(leftOut
-      ? [`(${leftOut} more boxes are left out: those without Japanese, then those farthest from the pointer.)`]
+      ? [
+          `(${leftOut} more boxes are left out: those without ${languageOf(language).name}, then those farthest from the pointer.)`
+        ]
       : []),
     '',
     describePointer(target)
   ].join('\n')
-  return { text, boxes: ordered, target, area: frame }
+  return { text, boxes: ordered, target, area: frame, language: languageOf(language).code }
 }
 
-const JAPANESE = /[぀-ヿ㐀-鿿豈-﫿ｦ-ﾟ]/
-
 /**
- * At most `MAX_BOXES` of the boxes: with more, those with Japanese in them come first (a game's
- * menus, a browser's tabs and a desktop's icons are mostly not what is being read), then those
- * nearest the pointer, then the larger.
+ * At most `MAX_BOXES` of the boxes: with more, those in the language's scripts come first (a
+ * game's menus, a browser's tabs and a desktop's icons are mostly not what is being read), then
+ * those nearest the pointer, then the larger.
  */
-function keep(boxes, point) {
+function keep(boxes, point, language) {
   if (boxes.length <= MAX_BOXES) return boxes
-  const rank = (b) => [JAPANESE.test(b.text) ? 0 : 1, point ? distance(b, point) : 0, -(b.width * b.height)]
+  const rank = (b) => [
+    hasLanguageScript(b.text, language) ? 0 : 1,
+    point ? distance(b, point) : 0,
+    -(b.width * b.height)
+  ]
   return boxes
     .map((box) => ({ box, rank: rank(box) }))
     .sort((a, b) => a.rank[0] - b.rank[0] || a.rank[1] - b.rank[1] || a.rank[2] - b.rank[2])

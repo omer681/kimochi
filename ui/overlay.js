@@ -426,7 +426,7 @@ hook.card = createHookCard(document.body, {
 
 // A short spoken chat about the overlay's text, on the Voice chat shortcut (ui/voice-chat.js).
 const voiceChat = createVoiceChat(document.body, {
-  connect: (sdp, screen, context) => native.voiceChatConnect(sdp, screen, context),
+  connect: (sdp, screen, context, language) => native.voiceChatConnect(sdp, screen, context, language),
   warm: () => native.voiceChatWarm(),
   endKey: async () => {
     const hotkeys = await native.hotkeysLoad().catch(() => null)
@@ -458,10 +458,11 @@ function toggleVoiceChat() {
   if (!line.trim()) return voiceChat.notice('Scan the text first, then talk about it.')
   // The screen as a map of its text and where the pointer is; just the line when it can't be placed.
   const boxes = screenTextBoxes()
-  const screen = describeScreen(boxes, screenArea(), lastPointer) ?? { text: line, boxes: [] }
+  const language = languageNow()
+  const screen = describeScreen(boxes, screenArea(), lastPointer, language) ?? { text: line, boxes: [], language }
   // The last 200 words of lines that were on screen before and are gone now, each once, oldest
   // first (a dialog box's earlier lines).
-  const context = pastLines(history.slice(1), [line, ...boxes.map((box) => box.text)])
+  const context = pastLines(history.slice(1), [line, ...boxes.map((box) => box.text)], language)
   return voiceChat.toggle(screen, context)
 }
 

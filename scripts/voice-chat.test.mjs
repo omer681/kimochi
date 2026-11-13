@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { acceleratorLabel, closedProblem, pastLines, tail, wordCount } from '../ui/voice-chat.js'
+import { load } from './load.mjs'
+
+const { acceleratorLabel, closedProblem, pastLines, tail, wordCount } = await load('voice-chat.js')
 
 test('earlier lines are each line gone from the screen, once, oldest first', () => {
   // Newest first, as the history keeps them: a dialog box under a menu that stays put.
@@ -31,7 +33,7 @@ test('earlier lines stop at the line that reaches the word limit, keeping the ne
   const entries = Array.from({ length: 10 }, (_, i) => ({ text: `line ${10 - i} one two three` }))
   // Five words a line: the newest four make 20.
   assert.equal(
-    pastLines(entries, [], 20),
+    pastLines(entries, [], undefined, 20),
     'line 7 one two three\nline 8 one two three\nline 9 one two three\nline 10 one two three'
   )
   assert.equal(pastLines([], ['x']), '')
@@ -55,6 +57,9 @@ test('words are counted in Japanese too', () => {
   assert.equal(wordCount('one two three'), 3)
   assert.ok(wordCount('今日は楽しかった') >= 3)
   assert.equal(wordCount('。！'), 0)
+  // In the language being learned: Spanish words by its spaces, Thai by its own word breaker.
+  assert.equal(wordCount('¿Dónde está la estación?', 'es'), 4)
+  assert.ok(wordCount('ฉันชอบกินข้าว', 'th') >= 3)
 })
 
 test('the card names the shortcut as the platform does', () => {

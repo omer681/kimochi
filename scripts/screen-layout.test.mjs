@@ -1,14 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  describePointer,
-  describeScreen,
-  drawMap,
-  markUnder,
-  placeName,
-  pointerTarget,
-  readingOrder
-} from '../ui/screen-layout.js'
+import { load } from './load.mjs'
+
+const { describePointer, describeScreen, drawMap, markUnder, placeName, pointerTarget, readingOrder } =
+  await load('screen-layout.js')
 
 const area = { x: 0, y: 0, width: 960, height: 540 }
 /** A name box at the bottom left and the dialogue under it, with word boxes on the dialogue. */
@@ -165,4 +160,32 @@ test('the screen description has the map, the legend and the pointer; nothing wi
   assert.equal(describeScreen([], area, null), null)
   // Without an area, the text's own extent frames the map.
   assert.ok(describeScreen([name], null, null).text.includes('[1]'))
+})
+
+test('in a language that spaces its words, word boxes are spaced and the pointer means one word', () => {
+  const en = ['Where', 'is', 'the', 'station?'].map((text, i) => ({ x: i * 60, y: 0, width: 50, height: 20, text }))
+  const line = {
+    x: 0,
+    y: 0,
+    width: 230,
+    height: 20,
+    text: 'Where is the station?',
+    lines: [{ x: 0, y: 0, width: 230, height: 20 }],
+    lineSegments: [en]
+  }
+  // On "station?", past its first letters.
+  const under = markUnder(line, { x: 200, y: 10 }, 'es')
+  assert.equal(under.line, 'Where is the station?')
+  assert.equal(under.word, 'station')
+  assert.equal(under.marked, 'Where is the 【station】?')
+})
+
+test('with too many boxes, those in the language being learned are kept first', () => {
+  const box = (i, text) => ({ x: (i % 10) * 90, y: Math.floor(i / 10) * 60, width: 80, height: 40, text })
+  const boxes = [...Array.from({ length: 30 }, (_, i) => box(i, `${i}`)), box(30, 'Hola'), box(31, 'こんにちは')]
+  const spanish = describeScreen(boxes, area, null, 'es')
+  assert.ok(spanish.boxes.some((b) => b.text === 'Hola'))
+  assert.match(spanish.text, /those without Spanish/)
+  assert.equal(spanish.language, 'es')
+  assert.ok(describeScreen(boxes, area, null).boxes.some((b) => b.text === 'こんにちは'))
 })
