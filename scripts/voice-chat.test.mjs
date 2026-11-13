@@ -1,8 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { load } from './load.mjs'
 
-const { acceleratorLabel, closedProblem, pastLines, tail, wordCount } = await load('voice-chat.js')
+const { acceleratorLabel, closedProblem, fromSource, pastLines, tail, wordCount } = await load('voice-chat.js')
 
 test('earlier lines are each line gone from the screen, once, oldest first', () => {
   // Newest first, as the history keeps them: a dialog box under a menu that stays put.
@@ -87,4 +88,23 @@ test('only a session closed for a reason worth saying puts a problem on the card
   assert.equal(closedProblem('remote_hangup'), null)
   assert.match(closedProblem('content'), /content/)
   assert.match(closedProblem('connection_lost'), /dropped/)
+})
+
+test('earlier lines come only from the source on screen', () => {
+  const game = { text: 'a', source: { sourceId: 'windows:window:1' } }
+  const other = { text: 'b', source: { sourceId: 'windows:window:2' } }
+  const shot = { text: 'c', source: null }
+  assert.deepEqual(fromSource([game, other, shot], 'windows:window:1'), [game])
+  // The source is not known: nothing can be told apart.
+  assert.deepEqual(fromSource([game, other, shot], null), [game, other, shot])
+})
+
+test('the voices in Settings are the voices native accepts', () => {
+  const quoted = (text) => [...text.matchAll(/['"]([a-z]+)['"]/g)].map((m) => m[1])
+  const rust = readFileSync(new URL('../src-tauri/src/voice_chat.rs', import.meta.url), 'utf8')
+  const tsx = readFileSync(new URL('../frontend/panels/settings/AssistTab.tsx', import.meta.url), 'utf8')
+  const native = quoted(rust.match(/const VOICES: &\[&str\] = &\[([\s\S]*?)\];/)[1])
+  const settings = quoted(tsx.match(/const VOICES = \[([\s\S]*?)\]\.map/)[1])
+  assert.ok(native.length > 5)
+  assert.deepEqual(settings, native)
 })

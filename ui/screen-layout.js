@@ -22,7 +22,7 @@
  * }} TextBox
  */
 
-import { textLang } from './language-style.js'
+import { wordSegmenter } from './language-style.js'
 import { languageOf } from './languages.js'
 import { hasLanguageScript, joiner } from './script-text.js'
 
@@ -30,7 +30,13 @@ const COLS = 48
 const ROWS = 14
 /** More boxes than this is a page of small print; the rest are left out of the map and legend. */
 const MAX_BOXES = 24
+/**
+ * A box's text is cut to its share of `MAX_LEGEND_TEXT` characters, and never below
+ * `MAX_BOX_TEXT`: a page of one long block (a novel, a long narration) goes whole, a screen of
+ * many blocks stays within what native sends (`MAX_SCREEN` in src-tauri/src/voice_chat.rs).
+ */
 const MAX_BOX_TEXT = 240
+const MAX_LEGEND_TEXT = 6000
 
 const inside = (r, p) => p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height
 /** Distance from a point to a rectangle (0 inside). */
@@ -102,29 +108,13 @@ function characterAt(line, text, point, down, language) {
 /** A line's word boxes as one text: run together, or spaced in a language that spaces its words. */
 const joinWords = (words, language) => words.reduce((text, w) => text + joiner(text, w.text, language) + w.text, '')
 
-const segmenters = new Map()
-
-/**
- * The language's word boundaries (the platform's dictionary-based word breaker for Japanese,
- * Chinese and Thai), or null without one.
- */
-function segmenterFor(language) {
-  const lang = textLang(language)
-  if (!segmenters.has(lang))
-    segmenters.set(
-      lang,
-      typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(lang, { granularity: 'word' }) : null
-    )
-  return segmenters.get(lang)
-}
-
 /**
  * The word around character `at` of `chars`, as character indices [from, to): the word the
  * platform's word breaker for the language finds there (天気, not 天), or the character alone
  * where that is punctuation or there is no word breaker.
  */
 export function wordAround(chars, at, language) {
-  const segmenter = segmenterFor(language)
+  const segmenter = wordSegmenter(language)
   if (!segmenter) return [at, at + 1]
   let index = 0
   for (const part of segmenter.segment(chars.join(''))) {
@@ -259,6 +249,7 @@ export function describeScreen(boxes, area, point, language) {
   const kept = keep(usable, point, language)
   const ordered = readingOrder(kept)
   const leftOut = usable.length - kept.length
+  const boxText = Math.max(MAX_BOX_TEXT, Math.floor(MAX_LEGEND_TEXT / ordered.length))
   const legend = ordered.map((box, i) => {
     const lines = linesOf(box)
       .map((l) => clean(l.text))
@@ -271,7 +262,7 @@ export function describeScreen(boxes, area, point, language) {
       .filter(Boolean)
       .join(', ')
     const text = clean(box.text)
-    return `[${i + 1}] (${shape}) ${text.length > MAX_BOX_TEXT ? `${text.slice(0, MAX_BOX_TEXT)}…` : text}`
+    return `[${i + 1}] (${shape}) ${text.length > boxText ? `${text.slice(0, boxText)}…` : text}`
   })
   const target = pointerTarget(ordered, point, frame, language)
   const text = [

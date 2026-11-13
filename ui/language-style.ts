@@ -135,7 +135,7 @@ export function applyTextStyle(
   }
 }
 
-type Segmenter = { segment: (text: string) => Iterable<{ segment: string }> }
+type Segmenter = { segment: (text: string) => Iterable<{ segment: string; isWordLike?: boolean }> }
 const SegmenterClass = (Intl as unknown as { Segmenter?: new (locale?: string, options?: object) => Segmenter })
   .Segmenter
 const graphemeSegmenter: Segmenter | null = SegmenterClass
@@ -163,6 +163,24 @@ export function textUnits(text: string, code?: unknown): string[] {
 const wordSegmenters = new Map<string, Segmenter | null>()
 
 /**
+ * The platform's word breaker for the language `code` (dictionary-based for Japanese, Chinese and
+ * Thai), one per language; null where there is none or it does not know the language.
+ */
+export function wordSegmenter(code?: unknown): Segmenter | null {
+  const lang = textStyle(code).code
+  let segmenter = wordSegmenters.get(lang)
+  if (segmenter === undefined) {
+    try {
+      segmenter = SegmenterClass ? new SegmenterClass(lang, { granularity: 'word' }) : null
+    } catch {
+      segmenter = null
+    }
+    wordSegmenters.set(lang, segmenter)
+  }
+  return segmenter
+}
+
+/**
  * `text` cut where a line of it may break, each piece with the spaces after it: at spaces in a
  * language that spaces its words, at word boundaries (`Intl.Segmenter`) in one that does not
  * (Thai, Lao, Khmer). Joined, the pieces are `text`.
@@ -170,11 +188,7 @@ const wordSegmenters = new Map<string, Segmenter | null>()
 export function wordPieces(text: string, code?: unknown): string[] {
   const style = textStyle(code)
   if (style.spaces) return text.match(/\s+|\S+\s*/gu) ?? []
-  let segmenter = wordSegmenters.get(style.code)
-  if (segmenter === undefined) {
-    segmenter = SegmenterClass ? new SegmenterClass(style.code, { granularity: 'word' }) : null
-    wordSegmenters.set(style.code, segmenter)
-  }
+  const segmenter = wordSegmenter(code)
   if (!segmenter) return graphemes(text)
   const pieces: string[] = []
   for (const { segment } of segmenter.segment(text)) {

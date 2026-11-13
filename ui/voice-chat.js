@@ -1,5 +1,5 @@
 /* eslint @typescript-eslint/explicit-function-return-type: "off" -- Plain JS runtime glue. */
-import { textLang } from './language-style.js'
+import { wordSegmenter } from './language-style.js'
 import { languageOf } from './languages.js'
 import { describePointer, pointerTarget } from './screen-layout.js'
 /**
@@ -46,6 +46,10 @@ const CLOSE_MS = 2_000
 const NO_BACKEND = 'No backend is available. Answer from your own knowledge.'
 /** The pointer has to rest on another word this long before the model is told. */
 const POINTER_SETTLE_MS = 400
+/** A connection that drops gets this long to come back by itself (WebRTC often does) before the chat ends. */
+const RECONNECT_MS = 5_000
+/** What goes before anything the model is told quietly while the chat runs. */
+const QUIETLY = "Context only, not a question; don't reply to it."
 
 const make = (tag, className, text) => {
   const element = document.createElement(tag)
@@ -85,25 +89,12 @@ const MAX_PAST_WORDS = 200
 /** A line's letters, digits and kana/kanji: what stays the same between two readings of it. */
 const letters = (text) => (String(text ?? '').match(/[\p{L}\p{N}]/gu) ?? []).join('')
 
-const segmenters = new Map()
-
-/** The platform's word breaker for the language `code`, or null without one. */
-function segmenterFor(code) {
-  const lang = textLang(code)
-  if (!segmenters.has(lang))
-    segmenters.set(
-      lang,
-      typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(lang, { granularity: 'word' }) : null
-    )
-  return segmenters.get(lang)
-}
-
 /**
  * How many words `text` has in the language `code` (Japanese when absent), one that writes its
  * words without spaces between them included.
  */
 export function wordCount(text, code) {
-  const segmenter = segmenterFor(code)
+  const segmenter = wordSegmenter(code)
   if (!segmenter) {
     // Without a word breaker: the spaced words, or, unspaced, a word for about two letters.
     if (languageOf(code).spaces)
@@ -142,6 +133,11 @@ function entryLines(entry) {
  * out when the screen still shows it, or when a newer line already kept holds it (the box was
  * scanned while its text was still typing out); an older line that holds a kept one replaces it.
  * Stops at the line that brings it to `max` words, counted in the language `language`.
+ *
+ * A short line ("はい。", "No.") whose letters are found inside the screen's text or inside a
+ * longer kept line is left out as if it were that text. That is meant: these lines are context
+ * for the model, and one that short adds nothing a longer line holding the same words has not
+ * already given it, so it is not worth telling a real repeat from a chance one.
  * @param {{ text?: string, groups?: { text?: string }[] }[]} entries
  * @param {(string | undefined)[]} current
  * @param {string} [language]
@@ -173,6 +169,17 @@ export function pastLines(entries, current, language, max = MAX_PAST_WORDS) {
     }
   }
   return result()
+}
+
+/**
+ * The scans read from the source `sourceId` (a history entry's `source.sourceId`): another
+ * game's lines, a Quick Shot's or a browser tab's were never on this screen. Every entry when the
+ * source is not known.
+ * @param {{ source?: { sourceId?: string } | null }[]} entries
+ * @param {string | null | undefined} sourceId
+ */
+export function fromSource(entries, sourceId) {
+  return sourceId ? entries.filter((entry) => entry?.source?.sourceId === sourceId) : entries
 }
 
 /** What a microphone failure means for the reader. */
@@ -292,6 +299,7 @@ export function createVoiceChat(parent, hooks) {
   function hangUp(current) {
     clearInterval(current.watch)
     clearTimeout(current.pointerTimer)
+    clearTimeout(current.reconnectTimer)
     try {
       current.channel?.close()
     } catch {
@@ -335,6 +343,24 @@ export function createVoiceChat(parent, hooks) {
     }
   }
 
+  /**
+   * Tell the model quietly that the screen is now `screen`: the boxes the pointer is read
+   * against, and the map and legend as at the start. Before the session has started it waits.
+   */
+  function tellScreen(current, screen) {
+    current.boxes = screen.boxes ?? []
+    current.area = screen.area ?? null
+    if (screen.text === current.screenText) return
+    if (!current.started) {
+      current.pendingScreen = screen
+      return
+    }
+    const content = `${QUIETLY}\nThe screen changed. On screen now:\n${screen.text}`
+    if (!send(current, { type: 'session.thinking.append', delegation_id: null, content })) return
+    current.screenText = screen.text
+    current.pointerSaid = pointerKey(screen.target ?? null)
+  }
+
   /** Server events: transcripts on the card, delegations answered, the session's end. */
   function onEvent(current, event) {
     // A chat already ended on the card still hears its `session.closed`, to hang up.
@@ -352,6 +378,8 @@ export function createVoiceChat(parent, hooks) {
         current.started = true
         current.lastActivity = now
         show('ready', 'Ask away')
+        if (current.pendingScreen) tellScreen(current, current.pendingScreen)
+        current.pendingScreen = null
         break
       case 'session.input_transcript.delta':
         current.lastActivity = now
@@ -413,6 +441,9 @@ export function createVoiceChat(parent, hooks) {
       channel: null,
       watch: 0,
       hangUpTimer: 0,
+      reconnectTimer: 0,
+      /** A screen that changed before the session started, told once it has. */
+      pendingScreen: null,
       /** Milliseconds from the press to each step. */
       timings: {},
       /** The screen's boxes in their numbered order, for the pointer updates. */
@@ -421,6 +452,8 @@ export function createVoiceChat(parent, hooks) {
       area: screen.area ?? null,
       /** The language being read (a code from languages.ts). */
       language: languageOf(screen.language).code,
+      /** The screen as the model was last told it. */
+      screenText: screen.text,
       /** What the model was last told the pointer is on, and the move waiting to be told. */
       pointerSaid: pointerKey(screen.target ?? null),
       pointerTimer: 0
@@ -466,9 +499,15 @@ export function createVoiceChat(parent, hooks) {
       })
       peer.addEventListener('connectionstatechange', () => {
         if (peer.connectionState === 'connected') mark('connected')
+        clearTimeout(current.reconnectTimer)
         if (call !== current) return
-        if (peer.connectionState === 'failed' || peer.connectionState === 'disconnected')
-          end('connection', 'The connection to OpenAI dropped.')
+        const dropped = () => end('connection', 'The connection to OpenAI dropped.')
+        if (peer.connectionState === 'failed') dropped()
+        // 'disconnected' is often a blip the connection recovers from: only one that lasts ends the chat.
+        else if (peer.connectionState === 'disconnected')
+          current.reconnectTimer = setTimeout(() => {
+            if (call === current && peer.connectionState !== 'connected') dropped()
+          }, RECONNECT_MS)
       })
       // Both before the offer, so the offer carries them.
       slot = peer.addTransceiver('audio', { direction: 'sendrecv' })
@@ -559,15 +598,23 @@ export function createVoiceChat(parent, hooks) {
     pointer(point) {
       const current = call
       if (!current?.started || !current.boxes.length) return
-      const target = pointerTarget(current.boxes, point, current.area, current.language)
-      const key = pointerKey(target)
+      // What it is on is worked out once it rests, not on every move.
       clearTimeout(current.pointerTimer)
-      if (key === current.pointerSaid) return
       current.pointerTimer = setTimeout(() => {
         if (call !== current) return
-        const content = `Context only, not a question; don't reply to it.\n${describePointer(target)}`
+        const target = pointerTarget(current.boxes, point, current.area, current.language)
+        const key = pointerKey(target)
+        if (key === current.pointerSaid) return
+        const content = `${QUIETLY}\n${describePointer(target)}`
         if (send(current, { type: 'session.thinking.append', delegation_id: null, content })) current.pointerSaid = key
       }, POINTER_SETTLE_MS)
+    },
+    /**
+     * The overlay shows another screen (a new scan, a new hooked line) while a chat is on: the
+     * model is told what is on it now, and the pointer is read against it from here on.
+     */
+    screen(screen) {
+      if (call && screen?.text) tellScreen(call, screen)
     },
     /** Say why there is nothing to start, briefly. */
     notice(text) {

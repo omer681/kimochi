@@ -60,7 +60,7 @@ import { recognize } from './ocr.js'
 import { annotationGroups, hookAnnotations, splitSpeaker } from './hook-match.js'
 import { createHookCard, HOOK_CARD_OPACITIES } from './hook-card.js'
 import { createOverlayHints, HINTS_DISMISSED } from './overlay-hints.js'
-import { acceleratorLabel, createVoiceChat, pastLines, prewarmWebRtc } from './voice-chat.js'
+import { acceleratorLabel, createVoiceChat, fromSource, pastLines, prewarmWebRtc } from './voice-chat.js'
 import { describeScreen } from './screen-layout.js'
 import { hookCardShow, hookSettings } from './hook-games.js'
 import { normalizeOcrResult, scanGroups } from './ocr-result.js'
@@ -453,28 +453,61 @@ function toggleVoiceChat() {
     log({ check: 'voice-chat', event: 'skipped', reason: 'overlay hidden' })
     return undefined
   }
-  const history = listHistory() ?? []
-  const line = state.annotations.length > 0 ? (history[0]?.text ?? '') : ''
-  if (!line.trim()) return voiceChat.notice('Scan the text first, then talk about it.')
-  // The screen as a map of its text and where the pointer is; just the line when it can't be placed.
-  const boxes = screenTextBoxes()
-  const language = languageNow()
-  const screen = describeScreen(boxes, screenArea(), lastPointer, language) ?? { text: line, boxes: [], language }
+  const shown = voiceChatScreen()
+  if (!shown) return voiceChat.notice('Scan the text first, then talk about it.')
   // The last 200 words of lines that were on screen before and are gone now, each once, oldest
-  // first (a dialog box's earlier lines).
-  const context = pastLines(history.slice(1), [line, ...boxes.map((box) => box.text)], language)
-  return voiceChat.toggle(screen, context)
+  // first (a dialog box's earlier lines). Only this source's: another game's lines were never on
+  // this screen. The newest entry is not taken for the screen (a scan the history already had is
+  // not written again): what is on screen is left out by its text.
+  const earlier = fromSource(listHistory() ?? [], state.info?.source_id)
+  const context = pastLines(earlier, shown.texts, shown.screen.language)
+  return voiceChat.toggle(shown.screen, context)
 }
 
-/** Where the overlay's text is, in overlay coordinates, with its lines and words where known. */
+/**
+ * What a voice chat is told is on screen, and its texts: the map of the overlay's text and where
+ * the pointer is (`describeScreen`), or just the text when it can't be placed. Null with no text.
+ */
+function voiceChatScreen() {
+  const boxes = screenTextBoxes()
+  const language = languageNow()
+  // Text that has no box: the Text Hooker's line with its card not placed, or a scan not yet laid out.
+  const hooked = hookMode() ? (hook.shown ?? hook.line ?? '') : ''
+  const unplaced =
+    hooked && !boxes.some((box) => box.text === hooked)
+      ? hooked
+      : !boxes.length && state.annotations.length > 0
+        ? (listHistory()?.[0]?.text ?? '')
+        : ''
+  const texts = [...boxes.map((box) => box.text), unplaced].filter((text) => text?.trim())
+  if (!texts.length) return null
+  const described = describeScreen(boxes, screenArea(), lastPointer, language)
+  const text = [described?.text, unplaced && (described ? `Also on screen: ${unplaced}` : unplaced)]
+    .filter(Boolean)
+    .join('\n\n')
+  return { screen: { ...(described ?? { boxes: [], language }), text }, texts }
+}
+
+/**
+ * Where the overlay's text is, in overlay coordinates, with its lines and words where known. With
+ * the Text Hooker on, the hooked line in its card is a box too: OCR's reading is then only the
+ * speaker's name (`setOcrAnnotations`).
+ */
 function screenTextBoxes() {
-  if (!state.info || !state.origin || !state.annotations.length) return []
-  try {
-    const shown = visibleAnnotations(state.annotations, setting('textOverlayGrouping'))
-    return mapAnnotations(state.info, shown, state.origin, sourceBoundsNow() ?? undefined)
-  } catch {
-    return []
+  const boxes = []
+  if (state.info && state.origin && state.annotations.length) {
+    try {
+      const shown = visibleAnnotations(state.annotations, setting('textOverlayGrouping'))
+      boxes.push(...mapAnnotations(state.info, shown, state.origin, sourceBoundsNow() ?? undefined))
+    } catch {
+      /* the text alone is told */
+    }
   }
+  const hooked = hookMode() ? (hook.shown ?? hook.line) : null
+  const card = hooked ? hook.card?.box() : null
+  if (card?.width > 0 && card?.height > 0)
+    boxes.push({ x: card.x, y: card.y, width: card.width, height: card.height, text: hooked })
+  return boxes
 }
 
 /** The source's bounds on the desktop now, as `textBoxes` reads them. */
@@ -1197,6 +1230,8 @@ function draw() {
   if (state.appliedScanId !== controllerScanId) {
     controllerScanId = state.appliedScanId
     controller.scanChanged()
+    // A chat going on is about this screen now.
+    if (voiceChat.active) voiceChat.screen(voiceChatScreen()?.screen)
   }
 }
 
@@ -1702,6 +1737,7 @@ function onHookLine(payload) {
   setOcrAnnotations(state.rawAnnotations ?? [])
   syncHookCard()
   controller?.hookChanged?.()
+  if (voiceChat.active) voiceChat.screen(voiceChatScreen()?.screen)
 }
 
 /**
@@ -4635,6 +4671,9 @@ async function processView(view) {
     }
     const autoChanged = flags.autoOcrEnabled !== state.flags.autoOcrEnabled
     state.flags = flags
+    // A chat is about what the overlay shows: hidden, its card is gone and nothing says the
+    // microphone is still open, so it ends.
+    if (!flags.overlayVisible && voiceChat.active) voiceChat.end()
     if (autoChanged) syncAutoScanner()
     syncOverlayText()
     document.body.classList.toggle('debug', flags.debugOverlayVisible)

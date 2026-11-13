@@ -1168,7 +1168,7 @@ handshake for the overlay's WebRTC call to OpenAI's GPT-Live (`gpt-live-1`). It 
 session, `POST https://api.openai.com/v1/live/sessions` with `voiceChat.openaiApiKey` and
 `{session: {model, instructions, audio.output.voice, delegation: {type: 'client'}}, transport:
 {type: 'webrtc', sdp}}`, and returns the answer in the `201`'s `transport.sdp`. The instructions
-are built from `screen` and `context` (the last 200 words of lines that were on screen and are
+are built from `screen` and `context` (the last 200 words of lines this source had on screen and are
 not now, each once wherever it was, oldest first, marked `(line 2 of 3)` in its block where the
 history entry kept its `groups`: `pastLines` in `ui/voice-chat.js`), cut to 8000
 and the last 4000 characters, and `language`, the English name of the language being learned

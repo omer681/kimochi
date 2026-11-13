@@ -189,3 +189,18 @@ test('with too many boxes, those in the language being learned are kept first', 
   assert.equal(spanish.language, 'es')
   assert.ok(describeScreen(boxes, area, null).boxes.some((b) => b.text === 'こんにちは'))
 })
+
+test('one long block is told whole; many blocks are each cut to their share', () => {
+  const page = { x: 0, y: 0, width: 900, height: 500, text: 'あ'.repeat(1500) }
+  assert.ok(describeScreen([page], area, null).text.includes('あ'.repeat(1500)))
+  const many = Array.from({ length: 20 }, (_, i) => ({
+    x: 0,
+    y: i * 25,
+    width: 900,
+    height: 20,
+    text: 'い'.repeat(1500)
+  }))
+  const text = describeScreen(many, area, null).text
+  assert.ok(text.includes(`${'い'.repeat(300)}…`))
+  assert.ok(!text.includes('い'.repeat(301)))
+})
