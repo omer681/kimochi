@@ -1198,7 +1198,11 @@ an unknown name reads as it). Errors are worded for the reader: no key, no text,
 overlay (`ui/voice-chat.js`) owns the rest: the microphone (`getUserMedia`, echo cancellation on),
 the `oai-events` data channel (`session.started`, both sides' transcript fragments,
 `session.closed`), and the card; it ends the chat on the shortcut, after 25 s with nothing said
-either way, or at 3 minutes, with `session.close` (hanging up on `session.closed` or after 2 s).
+either way, or at 3 minutes, with `session.close` (hanging up on `session.closed` or after 2 s). Whatever ends it, the
+session is closed, since it bills by the second: a chat ended while OpenAI creates its session
+connects only to close it (up to 10 s); one whose session hasn't started 15 s after the press
+ends; the overlay going away (`pagehide`) closes it and hangs up at once; and every chat is hung
+up regardless 3 minutes and 12 s after the press.
 
 Setup runs side by side: on the press the overlay opens the microphone, builds its offer (an audio
 transceiver whose track is put in once the microphone is open; sent without waiting for its candidates)

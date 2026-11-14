@@ -36,15 +36,24 @@ const LINGER_MS = 2_500
 const ERROR_MS = 6_000
 /** After `session.close`, how long to wait for `session.closed` before hanging up anyway. */
 const CLOSE_MS = 2_000
+/** A session ended before it connected is connected only to close it, for at most this long. */
+const ABANDON_MS = 10_000
+/** A session that has not started this long after the press never will: the chat ends. */
+const START_MS = 15_000
+/**
+ * Hung up regardless this long after the press, should every other way to end a chat fail: a
+ * session left open bills by the second.
+ */
+const LAST_MS = MAX_MS + ABANDON_MS + CLOSE_MS
 /** The reply to a delegation: there is no backend, so the model answers itself. */
 const NO_BACKEND = 'No backend is available. Answer from your own knowledge.'
 /** The pointer has to rest on another word this long before the model is told. */
 const POINTER_SETTLE_MS = 400
 /** A connection that drops gets this long to come back by itself (WebRTC often does) before the chat ends. */
 const RECONNECT_MS = 5_000
-/** What goes before anything the model is told quietly while the chat runs. */
 /** The most characters of screen text in one appended context (see `pieces`). */
 const MAX_APPEND = 300
+/** What goes before anything the model is told quietly while the chat runs. */
 const QUIETLY = "Context only, not a question; don't reply to it."
 
 const make = (tag, className, text) => {
@@ -302,6 +311,8 @@ export function createVoiceChat(parent, hooks) {
   /** Hang up: the peer, the microphone and the speaker. */
   function hangUp(current) {
     clearInterval(current.watch)
+    clearTimeout(current.backstop)
+    clearTimeout(current.hangUpTimer)
     clearTimeout(current.pointerTimer)
     clearTimeout(current.reconnectTimer)
     try {
@@ -319,13 +330,38 @@ export function createVoiceChat(parent, hooks) {
   }
 
   /**
-   * End the chat on the card at once; the session is closed politely (`session.close`, then
-   * `session.closed` or `CLOSE_MS`) before hanging up, so its seconds stop being billed.
+   * Close the session so its seconds stop being billed, whatever state the call is in. The
+   * microphone and speaker go at once; then `session.close`, and the peer is hung up on
+   * `session.closed` or after `CLOSE_MS`. A session OpenAI has created but that hasn't connected
+   * yet is connected only to be closed (up to `ABANDON_MS`): a peer dropped before it connects
+   * can't tell OpenAI it has gone. Before OpenAI has answered there is no session to close.
    */
+  function closeSession(current) {
+    for (const track of current.microphone?.getTracks() ?? []) track.stop()
+    current.audio.muted = true
+    clearInterval(current.watch)
+    clearTimeout(current.pointerTimer)
+    clearTimeout(current.hangUpTimer)
+    // The session request is out: the peer stays, so the session it may create can be closed
+    // (`start` does, once the answer is in).
+    if (current.requesting) return
+    if (current.closed || !current.answered) return hangUp(current)
+    const close = () => {
+      clearTimeout(current.hangUpTimer)
+      if (!send(current, { type: 'session.close' })) return hangUp(current)
+      current.hangUpTimer = setTimeout(() => hangUp(current), CLOSE_MS)
+    }
+    if (current.channel?.readyState === 'open') return close()
+    current.hangUpTimer = setTimeout(() => hangUp(current), ABANDON_MS)
+    current.channel?.addEventListener('open', close, { once: true })
+  }
+
+  /** End the chat on the card at once, closing its session first (`closeSession`). */
   function end(reason, message) {
     const current = call
     if (!current) return
     call = null
+    closeSession(current)
     hooks.log({
       check: 'voice-chat',
       event: 'end',
@@ -340,12 +376,17 @@ export function createVoiceChat(parent, hooks) {
       show('ended', reason === 'time' ? 'Voice chat ended (time’s up)' : 'Voice chat ended')
       hideAfter(LINGER_MS)
     }
-    if (current.started && !current.closed && send(current, { type: 'session.close' })) {
-      current.hangUpTimer = setTimeout(() => hangUp(current), CLOSE_MS)
-    } else {
-      hangUp(current)
-    }
   }
+
+  // The overlay going away (reloaded, or the app quitting) takes the chat with it: closing the
+  // peer tells OpenAI at once, where a page that just vanished would leave it to notice by itself.
+  globalThis.addEventListener?.('pagehide', () => {
+    const current = call
+    if (!current) return
+    call = null
+    send(current, { type: 'session.close' })
+    hangUp(current)
+  })
 
   /**
    * Tell the model quietly that the screen is now `screen`: the boxes the pointer is read
@@ -443,6 +484,10 @@ export function createVoiceChat(parent, hooks) {
       startedAt: Date.now(),
       lastActivity: Date.now(),
       started: false,
+      /** OpenAI has created the session (its answer is set): from here it bills until closed. */
+      answered: false,
+      /** The session request is out (`hooks.connect`). */
+      requesting: false,
       closed: false,
       /** Who the last transcript fragment was from: 'you', 'ai' or null. */
       lastFrom: null,
@@ -454,6 +499,7 @@ export function createVoiceChat(parent, hooks) {
       channel: null,
       watch: 0,
       hangUpTimer: 0,
+      backstop: 0,
       reconnectTimer: 0,
       /** A screen that changed before the session started, told once it has. */
       pendingScreen: null,
@@ -475,6 +521,10 @@ export function createVoiceChat(parent, hooks) {
       current.timings[step] ??= Math.round(performance.now() - begun)
     }
     call = current
+    current.backstop = setTimeout(() => {
+      if (call === current) end('time')
+      hangUp(current)
+    }, LAST_MS)
     you.textContent = ''
     reply.textContent = ''
     show('connecting', 'Starting voice chat…')
@@ -567,18 +617,26 @@ export function createVoiceChat(parent, hooks) {
     try {
       const [track] = current.microphone.getAudioTracks()
       await slot.sender.replaceTrack(track ?? null)
-      const answer = await hooks.connect(
-        peer.localDescription?.sdp ?? '',
-        screen.text,
-        context,
-        languageOf(current.language).name
-      )
+      current.requesting = true
+      let answer
+      try {
+        answer = await hooks.connect(
+          peer.localDescription?.sdp ?? '',
+          screen.text,
+          context,
+          languageOf(current.language).name
+        )
+      } finally {
+        current.requesting = false
+      }
       mark('answer')
-      if (call !== current) return hangUp(current)
       await peer.setRemoteDescription({ type: 'answer', sdp: answer })
+      current.answered = true
+      // Ended while OpenAI was creating the session: it exists now, so it is closed, not dropped.
+      if (call !== current) return closeSession(current)
     } catch (error) {
       if (call === current) end('connect', String(error?.message ?? error))
-      else hangUp(current)
+      else closeSession(current)
       return
     }
 
@@ -586,6 +644,8 @@ export function createVoiceChat(parent, hooks) {
       if (call !== current) return
       const now = Date.now()
       if (now - current.startedAt >= MAX_MS) end('time')
+      else if (!current.started && now - current.startedAt >= START_MS)
+        end('connect', 'OpenAI didn’t start the voice chat.')
       else if (now - current.lastActivity >= QUIET_MS) end('quiet')
     }, 1000)
   }
