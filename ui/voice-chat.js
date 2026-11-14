@@ -43,6 +43,8 @@ const POINTER_SETTLE_MS = 400
 /** A connection that drops gets this long to come back by itself (WebRTC often does) before the chat ends. */
 const RECONNECT_MS = 5_000
 /** What goes before anything the model is told quietly while the chat runs. */
+/** The most characters of screen text in one appended context (see `pieces`). */
+const MAX_APPEND = 300
 const QUIETLY = "Context only, not a question; don't reply to it."
 
 const make = (tag, className, text) => {
@@ -66,6 +68,31 @@ export function acceleratorLabel(accelerator, mac) {
       return part.replace(/^Digit/, '')
     })
     .join(mac ? '' : '+')
+}
+
+/**
+ * `text` in pieces of at most `max` characters, cut between lines where it can be: GPT-Live takes
+ * 500 tokens in one appended context (`session.thinking.append`), and a character of the screen's
+ * text can be more than one token.
+ */
+export function pieces(text, max = MAX_APPEND) {
+  const out = []
+  let piece = ''
+  const push = () => {
+    if (piece) out.push(piece)
+    piece = ''
+  }
+  for (const line of String(text ?? '').split('\n')) {
+    const chars = Array.from(line)
+    if (piece && piece.length + 1 + line.length > max) push()
+    if (line.length <= max) {
+      piece = piece ? `${piece}\n${line}` : line
+      continue
+    }
+    for (let at = 0; at < chars.length; at += max) out.push(chars.slice(at, at + max).join(''))
+  }
+  push()
+  return out
 }
 
 /** The end of a long answer, which is the part being said now. */
@@ -332,8 +359,13 @@ export function createVoiceChat(parent, hooks) {
       current.pendingScreen = screen
       return
     }
-    const content = `${QUIETLY}\nThe screen changed. On screen now:\n${screen.text}`
-    if (!send(current, { type: 'session.thinking.append', delegation_id: null, content })) return
+    // In pieces, each small enough for one append; a refused one would leave the model on the old screen.
+    const parts = pieces(screen.text)
+    for (const [i, part] of parts.entries()) {
+      const which = parts.length > 1 ? ` (part ${i + 1} of ${parts.length})` : ''
+      const content = `${QUIETLY}\nThe screen changed. On screen now${which}:\n${part}`
+      if (!send(current, { type: 'session.thinking.append', delegation_id: null, content })) return
+    }
     current.screenText = screen.text
     current.pointerSaid = pointerKey(screen.target ?? null)
   }
@@ -366,6 +398,7 @@ export function createVoiceChat(parent, hooks) {
           show('listening', 'Listening…')
         }
         current.heard += event.delta ?? ''
+        if (Number.isFinite(event.end_ms)) current.heardEnd = event.end_ms
         you.textContent = tail(current.heard.trim(), 200)
         break
       case 'session.output_transcript.delta':
@@ -374,6 +407,9 @@ export function createVoiceChat(parent, hooks) {
           current.lastFrom = 'ai'
           current.said = ''
           show('speaking', 'Speaking')
+          // How long the reply took to start after the learner stopped, on the session's own clock.
+          if (Number.isFinite(event.start_ms) && Number.isFinite(current.heardEnd))
+            hooks.log({ check: 'voice-chat', event: 'reply', wait: Math.round(event.start_ms - current.heardEnd) })
         }
         current.said += event.delta ?? ''
         reply.textContent = tail(current.said.trim())

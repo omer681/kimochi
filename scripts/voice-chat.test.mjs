@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { load } from './load.mjs'
 
-const { acceleratorLabel, closedProblem, fromSource, pastLines, tail, wordCount } = await load('voice-chat.js')
+const { acceleratorLabel, closedProblem, fromSource, pastLines, pieces, tail, wordCount } = await load('voice-chat.js')
 
 test('earlier lines are each line gone from the screen, once, oldest first', () => {
   // Newest first, as the history keeps them: a dialog box under a menu that stays put.
@@ -107,4 +107,20 @@ test('the voices in Settings are the voices native accepts', () => {
   const settings = quoted(tsx.match(/const VOICES = \[([\s\S]*?)\]\.map/)[1])
   assert.ok(native.length > 5)
   assert.deepEqual(settings, native)
+})
+
+test('a changed screen goes in pieces that fit one append, cut between lines', () => {
+  assert.deepEqual(pieces('short'), ['short'])
+  assert.deepEqual(pieces(''), [])
+  const lines = Array.from({ length: 10 }, (_, i) => `[${i}] ${'あ'.repeat(96)}`)
+  const parts = pieces(lines.join('\n'), 300)
+  assert.equal(parts.length, 5)
+  assert.ok(parts.every((part) => part.length <= 300))
+  assert.equal(parts.join('\n'), lines.join('\n'))
+  // A line longer than a piece is cut, losing nothing.
+  const long = pieces('い'.repeat(700), 300)
+  assert.deepEqual(
+    long.map((part) => part.length),
+    [300, 300, 100]
+  )
 })

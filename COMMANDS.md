@@ -1185,8 +1185,9 @@ and the instructions say to talk about the whole word it belongs to, endings inc
 breaker cuts conjugated verbs short. With no box to place it is the newest scan's text alone.
 During the chat each move of the pointer to another word, once it has rested 400 ms, is sent as a
 `session.thinking.append` (`delegation_id: null`) in the same words, headed "Context only, not a
-question". Pace and length are set by the instructions alone (brisk; one or two short sentences,
-then stop): GPT-Live has no speed or output-length field. The key is never sent to a
+question". A screen that changes during the chat is sent the same way, in pieces of at most 300
+characters (one append takes 500 tokens). Pace and length are set by the instructions alone (as
+fast as stays clear; one or two short sentences, then stop): GPT-Live has no speed or output-length field. The key is never sent to a
 webview by this command (Settings still shows it, from `settings.json`).
 Client delegation is the only mode without a backend agent; the instructions say to answer
 everything itself, and the overlay answers any `session.delegation.created` at once with a
@@ -1207,7 +1208,8 @@ https://api.openai.com/` (nothing of the reader's; skipped without a key) on the
 one never starts a billed session. With the shortcut on, the overlay builds and drops one offer
 3 s after it loads, so the first press does not wait for WebRTC to start (about 0.4 s). Each
 chat's step times, from the press, are logged as `{check: "voice-chat", event: "ready",
-microphone, offer, answer, connected, channel, started}`. The microphone is granted to
+microphone, offer, answer, connected, channel, started}`, and each reply's wait after the learner
+stopped speaking, by the transcripts' own times, as `{check: "voice-chat", event: "reply", wait}`. The microphone is granted to
 the app's own pages without a prompt on Windows (patched wry, `kimochi_app_page`); on macOS the
 bundle declares `NSMicrophoneUsageDescription` (`Info.plist`) and the
 `com.apple.security.device.audio-input` entitlement (`Kimochi.entitlements`).
