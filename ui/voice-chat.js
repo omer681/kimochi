@@ -8,7 +8,7 @@ import { describePointer, pointerTarget } from './screen-layout.js'
  *
  * The call runs here over WebRTC: the microphone goes out and the model's voice comes back
  * straight between this webview and OpenAI. Native does only the handshake
- * (`voice_chat_connect`, src-tauri/src/voice_chat.rs), so the OpenAI key never reaches a page.
+ * (`voice_chat_connect`, src-tauri/src/voice_chat.rs), so the overlay never holds the OpenAI key.
  * Events on the `oai-events` data channel drive a card that says what is happening and shows the
  * last thing said each way: GPT-Live sends both sides' transcripts as fragments with no turns
  * marked, so a fragment from the other side starts a new line.
@@ -38,8 +38,10 @@ const ERROR_MS = 6_000
 const CLOSE_MS = 2_000
 /** A session ended before it connected is connected only to close it, for at most this long. */
 const ABANDON_MS = 10_000
-/** A session that has not started this long after the press never will: the chat ends. */
+/** A session that has not started this long after the microphone opened never will: the chat ends. */
 const START_MS = 15_000
+/** A microphone not open this long after the press (a prompt left unanswered, a stuck device): the chat ends. */
+const MICROPHONE_MS = 60_000
 /**
  * Hung up regardless this long after the press, should every other way to end a chat fail: a
  * session left open bills by the second.
@@ -402,9 +404,14 @@ export function createVoiceChat(parent, hooks) {
     }
     // In pieces, each small enough for one append; a refused one would leave the model on the old screen.
     const parts = pieces(screen.text)
-    for (const [i, part] of parts.entries()) {
-      const which = parts.length > 1 ? ` (part ${i + 1} of ${parts.length})` : ''
-      const content = `${QUIETLY}\nThe screen changed. On screen now${which}:\n${part}`
+    const said = parts.length
+      ? parts.map(
+          (part, i) =>
+            `The screen changed. On screen now${parts.length > 1 ? ` (part ${i + 1} of ${parts.length})` : ''}:\n${part}`
+        )
+      : ['The screen changed: there is no text on it now.']
+    for (const text of said) {
+      const content = `${QUIETLY}\n${text}`
       if (!send(current, { type: 'session.thinking.append', delegation_id: null, content })) return
     }
     current.screenText = screen.text
@@ -430,6 +437,8 @@ export function createVoiceChat(parent, hooks) {
         show('ready', 'Ask away')
         if (current.pendingScreen) tellScreen(current, current.pendingScreen)
         current.pendingScreen = null
+        // Where the pointer went while the session was starting: no move may come after it.
+        if (current.point !== undefined) tellPointer(current, current.point)
         break
       case 'session.input_transcript.delta':
         current.lastActivity = now
@@ -463,13 +472,24 @@ export function createVoiceChat(parent, hooks) {
       }
       case 'error':
         hooks.log({ check: 'voice-chat', event: 'error', code: event.error?.code ?? '' })
-        // A refused client event is not the end of the chat; a dead session closes on its own.
-        if (event.error?.client_event_id) break
+        // Once the session has started, an error is a refused client event (whether or not it names
+        // one), not the end of the chat; a dead session closes on its own (`session.closed`).
+        if (current.started || event.error?.client_event_id) break
         end('error', event.error?.message || 'OpenAI ended the voice chat.')
         break
       default:
         break
     }
+  }
+
+  /** Tell the model quietly what the pointer is on now, unless it was told that already. */
+  function tellPointer(current, point) {
+    if (!current.boxes.length) return
+    const target = pointerTarget(current.boxes, point, current.area, current.language)
+    const key = pointerKey(target)
+    if (key === current.pointerSaid) return
+    const content = `${QUIETLY}\n${describePointer(target)}`
+    if (send(current, { type: 'session.thinking.append', delegation_id: null, content })) current.pointerSaid = key
   }
 
   /**
@@ -484,8 +504,12 @@ export function createVoiceChat(parent, hooks) {
       startedAt: Date.now(),
       lastActivity: Date.now(),
       started: false,
-      /** OpenAI has created the session (its answer is set): from here it bills until closed. */
+      /** OpenAI has created the session (its answer is in): from here it bills until closed. */
       answered: false,
+      /** When the microphone opened (ms), from which the session has `START_MS` to start. */
+      microphoneAt: 0,
+      /** The pointer as last seen (overlay coordinates, or null off the game); undefined before any move. */
+      point: undefined,
       /** The session request is out (`hooks.connect`). */
       requesting: false,
       closed: false,
@@ -525,6 +549,17 @@ export function createVoiceChat(parent, hooks) {
       if (call === current) end('time')
       hangUp(current)
     }, LAST_MS)
+    // From the press, so a microphone that never opens ends the chat too.
+    current.watch = setInterval(() => {
+      if (call !== current) return
+      const now = Date.now()
+      if (now - current.startedAt >= MAX_MS) end('time')
+      else if (current.started) {
+        if (now - current.lastActivity >= QUIET_MS) end('quiet')
+      } else if (!current.microphoneAt) {
+        if (now - current.startedAt >= MICROPHONE_MS) end('microphone', 'The microphone didn’t open.')
+      } else if (now - current.microphoneAt >= START_MS) end('connect', 'OpenAI didn’t start the voice chat.')
+    }, 1000)
     you.textContent = ''
     reply.textContent = ''
     show('connecting', 'Starting voice chat…')
@@ -607,6 +642,7 @@ export function createVoiceChat(parent, hooks) {
 
     try {
       current.microphone = await microphone
+      current.microphoneAt = Date.now()
     } catch (error) {
       if (call === current) end('microphone', microphoneProblem(error))
       else hangUp(current)
@@ -629,25 +665,16 @@ export function createVoiceChat(parent, hooks) {
       } finally {
         current.requesting = false
       }
+      // The session exists from here, even should its answer not apply: it is closed, never dropped.
+      current.answered = true
       mark('answer')
       await peer.setRemoteDescription({ type: 'answer', sdp: answer })
-      current.answered = true
       // Ended while OpenAI was creating the session: it exists now, so it is closed, not dropped.
       if (call !== current) return closeSession(current)
     } catch (error) {
       if (call === current) end('connect', String(error?.message ?? error))
       else closeSession(current)
-      return
     }
-
-    current.watch = setInterval(() => {
-      if (call !== current) return
-      const now = Date.now()
-      if (now - current.startedAt >= MAX_MS) end('time')
-      else if (!current.started && now - current.startedAt >= START_MS)
-        end('connect', 'OpenAI didn’t start the voice chat.')
-      else if (now - current.lastActivity >= QUIET_MS) end('quiet')
-    }, 1000)
   }
 
   return {
@@ -670,16 +697,14 @@ export function createVoiceChat(parent, hooks) {
      */
     pointer(point) {
       const current = call
-      if (!current?.started || !current.boxes.length) return
+      if (!current) return
+      // Kept before the session starts too: it is told then (`session.started`).
+      current.point = point
+      if (!current.started || !current.boxes.length) return
       // What it is on is worked out once it rests, not on every move.
       clearTimeout(current.pointerTimer)
       current.pointerTimer = setTimeout(() => {
-        if (call !== current) return
-        const target = pointerTarget(current.boxes, point, current.area, current.language)
-        const key = pointerKey(target)
-        if (key === current.pointerSaid) return
-        const content = `${QUIETLY}\n${describePointer(target)}`
-        if (send(current, { type: 'session.thinking.append', delegation_id: null, content })) current.pointerSaid = key
+        if (call === current) tellPointer(current, current.point)
       }, POINTER_SETTLE_MS)
     },
     /**
@@ -687,7 +712,7 @@ export function createVoiceChat(parent, hooks) {
      * model is told what is on it now, and the pointer is read against it from here on.
      */
     screen(screen) {
-      if (call && screen?.text) tellScreen(call, screen)
+      if (call && screen) tellScreen(call, { ...screen, text: screen.text ?? '' })
     },
     /** Say why there is nothing to start, briefly. */
     notice(text) {

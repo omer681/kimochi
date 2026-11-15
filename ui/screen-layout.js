@@ -178,19 +178,48 @@ export function pointerTarget(boxes, point, area = null, language) {
 }
 
 /**
+ * The most characters of the paragraph, and of the line on each side of the marked word, that a
+ * pointer description carries: it goes in one appended context (`pieces` in ui/voice-chat.js),
+ * and the whole box is in the legend already.
+ */
+const MAX_PARAGRAPH = 100
+const MAX_AROUND = 40
+
+/** `text` cut to its first `max` characters. */
+const cutEnd = (text, max) => {
+  const chars = [...text]
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : text
+}
+
+/** The marked line with at most `MAX_AROUND` characters on each side of 【the word】. */
+function markedAround(marked) {
+  const open = marked.indexOf('【')
+  const close = marked.indexOf('】', open)
+  if (open < 0 || close < 0) return cutEnd(marked, MAX_AROUND * 2)
+  const before = [...marked.slice(0, open)]
+  const after = [...marked.slice(close + 1)]
+  return [
+    before.length > MAX_AROUND ? `…${before.slice(-MAX_AROUND).join('')}` : before.join(''),
+    marked.slice(open, close + 1),
+    cutEnd(after.join(''), MAX_AROUND)
+  ].join('')
+}
+
+/**
  * What the model is told about the pointer, at the start and on each move to another word: the
- * paragraph it is on or nearest, the line of it, and the word with its place in that line.
+ * paragraph it is on or nearest, the line of it, and the word with its place in that line; the
+ * paragraph and the line cut short (`MAX_PARAGRAPH`, `MAX_AROUND`).
  */
 export function describePointer(target) {
   if (!target) return 'The pointer is not over the game.'
   const where = target.on ? `on box [${target.number}]` : `not on any text; the nearest is box [${target.number}]`
-  const lines = [`The learner's pointer is ${where}.`, `Paragraph: ${target.paragraph}`]
+  const lines = [`The learner's pointer is ${where}.`, `Paragraph: ${cutEnd(target.paragraph, MAX_PARAGRAPH)}`]
   const u = target.under
   if (u) {
     const chars = u.start === u.end ? `character ${u.start}` : `characters ${u.start}–${u.end}`
     const on = u.character && u.character !== u.word ? ` (on its 「${u.character}」)` : ''
     lines.push(
-      `Line ${u.lineNumber} of ${u.lineCount}: ${u.marked}`,
+      `Line ${u.lineNumber} of ${u.lineCount}: ${markedAround(u.marked)}`,
       `${target.on ? 'Over' : 'Closest to'} the word 「${u.word}」${on}, ${chars} of ${u.length} in that line.`
     )
   }

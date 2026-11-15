@@ -477,7 +477,11 @@ function voiceChatScreen() {
     hooked && !boxes.some((box) => box.text === hooked)
       ? hooked
       : !boxes.length && state.annotations.length > 0
-        ? (listHistory()?.[0]?.text ?? '')
+        ? // The scan on screen's own text, not the history's newest entry (a repeat isn't written again).
+          visibleAnnotations(state.annotations, setting('textOverlayGrouping'))
+            .map((annotation) => annotation.description ?? '')
+            .filter((text) => text.trim())
+            .join('\n')
         : ''
   const texts = [...boxes.map((box) => box.text), unplaced].filter((text) => text?.trim())
   if (!texts.length) return null
@@ -486,6 +490,11 @@ function voiceChatScreen() {
     .filter(Boolean)
     .join('\n\n')
   return { screen: { ...(described ?? { boxes: [], language }), text }, texts }
+}
+
+/** The screen for a chat going on: `voiceChatScreen`'s, or one with no text when there is none. */
+function voiceChatScreenNow() {
+  return voiceChatScreen()?.screen ?? { text: '', boxes: [], area: screenArea(), language: languageNow() }
 }
 
 /**
@@ -505,8 +514,23 @@ function screenTextBoxes() {
   }
   const hooked = hookMode() ? (hook.shown ?? hook.line) : null
   const card = hooked ? hook.card?.box() : null
-  if (card?.width > 0 && card?.height > 0)
-    boxes.push({ x: card.x, y: card.y, width: card.width, height: card.height, text: hooked })
+  if (card?.width > 0 && card?.height > 0) {
+    // Its rows as wrapped, so a word on the second row is found on the second row.
+    const rows = hook.card.rows?.() ?? []
+    boxes.push({
+      x: card.x,
+      y: card.y,
+      width: card.width,
+      height: card.height,
+      text: hooked,
+      ...(rows.length
+        ? {
+            lines: rows.map(({ x, y, width, height }) => ({ x, y, width, height })),
+            lineTexts: rows.map((row) => row.text)
+          }
+        : {})
+    })
+  }
   return boxes
 }
 
@@ -1230,8 +1254,8 @@ function draw() {
   if (state.appliedScanId !== controllerScanId) {
     controllerScanId = state.appliedScanId
     controller.scanChanged()
-    // A chat going on is about this screen now.
-    if (voiceChat.active) voiceChat.screen(voiceChatScreen()?.screen)
+    // A chat going on is about this screen now, even one with no text left on it.
+    if (voiceChat.active) voiceChat.screen(voiceChatScreenNow())
   }
 }
 
@@ -1737,7 +1761,7 @@ function onHookLine(payload) {
   setOcrAnnotations(state.rawAnnotations ?? [])
   syncHookCard()
   controller?.hookChanged?.()
-  if (voiceChat.active) voiceChat.screen(voiceChatScreen()?.screen)
+  if (voiceChat.active) voiceChat.screen(voiceChatScreenNow())
 }
 
 /**

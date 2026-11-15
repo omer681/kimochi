@@ -470,6 +470,40 @@ export function createHookCard(parent, hooks) {
       card.hidden ? [] : [card.getBoundingClientRect(), ...(menu.hidden ? [] : [menu.getBoundingClientRect()])],
     /** The card's text box now (overlay coordinates), or null. */
     box: () => (box ? { ...box } : null),
+    /**
+     * The text's rows as the card wraps it now (overlay coordinates), each with its rectangle and
+     * its text; empty when it is not shown. Measured a character at a time, so only on demand.
+     */
+    rows: () => {
+      if (card.hidden || !text.textContent) return []
+      const rows = []
+      const range = document.createRange()
+      const walker = document.createTreeWalker(text, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        for (let at = 0; at < node.data.length;) {
+          const end = at + (node.data.codePointAt(at) > 0xffff ? 2 : 1)
+          range.setStart(node, at)
+          range.setEnd(node, end)
+          const r = range.getBoundingClientRect()
+          const char = node.data.slice(at, end)
+          at = end
+          if (!(r.width > 0)) continue
+          const row = rows.find((w) => Math.abs(w.y + w.height / 2 - (r.top + r.height / 2)) < r.height / 2)
+          if (!row) {
+            rows.push({ x: r.left, y: r.top, width: r.width, height: r.height, text: char })
+            continue
+          }
+          const right = Math.max(row.x + row.width, r.right)
+          const bottom = Math.max(row.y + row.height, r.bottom)
+          row.x = Math.min(row.x, r.left)
+          row.y = Math.min(row.y, r.top)
+          row.width = right - row.x
+          row.height = bottom - row.y
+          row.text += char
+        }
+      }
+      return rows
+    },
     element: card
   }
 }

@@ -4,8 +4,9 @@
 //! The overlay runs the call itself over WebRTC (microphone in, voice out, straight between the
 //! webview and OpenAI). Only the handshake is here: the overlay hands over its SDP offer and the
 //! text, and this creates the Live session with the user's key (`voiceChat.openaiApiKey`, a secret
-//! by its name, so it never syncs or leaves in a profile) and returns OpenAI's SDP answer. The key
-//! never reaches a webview; GPT-Live has no short-lived keys anyway.
+//! by its name, so it never syncs or leaves in a profile) and returns OpenAI's SDP answer. The
+//! overlay never asks for the key (Settings, where it is typed in, does hold it, like the DeepL
+//! key); GPT-Live has no short-lived keys to hand it instead anyway.
 //!
 //! There is no backend agent: the session is in client delegation mode (the only mode without
 //! one), its instructions say to answer everything itself, and the overlay answers any delegation

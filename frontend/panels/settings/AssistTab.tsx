@@ -147,8 +147,8 @@ const VOICES = [
 
 /**
  * Voice chat: a short spoken chat about the overlay's text with OpenAI's GPT-Live, on its
- * shortcut. The key is read by native only (`voice_chat_connect`); it is a secret by its name, so
- * it never syncs.
+ * shortcut. Only native uses the key (`voice_chat_connect`), and the overlay never asks for it;
+ * this page holds it, as it does the DeepL key. It is a secret by its name, so it never syncs.
  */
 function VoiceChatSection(): ReactNode {
   const [key, setKey] = useSetting<string>('voiceChat.openaiApiKey', '')
